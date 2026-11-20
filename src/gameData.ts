@@ -1,7 +1,65 @@
 export type Difficulty = 'Nebula' | 'Stellar' | 'Quasar';
 export type GameState = 'intro' | 'playing' | 'collapsed' | 'ascended' | 'neutron';
 export type Destiny = null | 'dwarf' | 'supernova';
-export type ParticleKind = 'helium' | 'alpha' | 'isotope' | 'shield';
+export type ParticleKind =
+    | 'helium'
+    | 'gamma'
+    | 'positron'
+    | 'alpha'
+    | 'resonant_alpha'
+    | 'isotope'
+    | 'dense_isotope'
+    | 'shield';
+
+export interface StagePhysicsProfile {
+    eraLabel: string;
+    endothermicDrainPerSec: number;
+    gammaChanceRatio: number;
+    positronChanceRatio: number;
+    resonantAlphaChance: number;
+    denseIsotopeChance: number;
+}
+
+export function getStagePhysics(elementIdx: number): StagePhysicsProfile {
+    if (elementIdx <= 2) {
+        return {
+            eraLabel: 'Carbon–Neon Burning',
+            endothermicDrainPerSec: 0,
+            gammaChanceRatio: 0,
+            positronChanceRatio: 0,
+            resonantAlphaChance: 0,
+            denseIsotopeChance: 0,
+        };
+    }
+    if (elementIdx <= 5) {
+        return {
+            eraLabel: 'Photodisintegration Era',
+            endothermicDrainPerSec: elementIdx >= 4 ? 0.25 : 0,
+            gammaChanceRatio: 0.24,
+            positronChanceRatio: elementIdx === 5 ? 0.12 : 0,
+            resonantAlphaChance: elementIdx >= 4 ? 0.22 : 0,
+            denseIsotopeChance: 0,
+        };
+    }
+    if (elementIdx <= 8) {
+        return {
+            eraLabel: 'Coulomb & Beta Flux',
+            endothermicDrainPerSec: 0.48,
+            gammaChanceRatio: 0.28,
+            positronChanceRatio: 0.22,
+            resonantAlphaChance: 0.28,
+            denseIsotopeChance: elementIdx >= 7 ? 0.24 : 0,
+        };
+    }
+    return {
+        eraLabel: 'Iron Peak Collapse',
+        endothermicDrainPerSec: 0.9,
+        gammaChanceRatio: 0.32,
+        positronChanceRatio: 0.28,
+        resonantAlphaChance: 0.32,
+        denseIsotopeChance: 0.32,
+    };
+}
 
 export interface ElementSpec {
     symbol: string;

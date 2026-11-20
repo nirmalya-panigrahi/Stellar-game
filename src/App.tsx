@@ -34,6 +34,7 @@ import {
     ELEMENTS,
     DESTINY_POEMS,
     DIFFICULTY_CONFIG,
+    getStagePhysics,
     Difficulty,
     GameState,
     Destiny,
@@ -134,6 +135,7 @@ function createParticle(
     isMobile: boolean
 ): SimParticle {
     const cfg = DIFFICULTY_CONFIG[difficulty];
+    const tierSpeedScale = 1 + currentElementIdx * 0.032;
     let x = 0;
     let y = 0;
     let vx = 0;
@@ -143,7 +145,7 @@ function createParticle(
         x = Math.random() * width;
         y = -20;
         vx = (Math.random() - 0.5) * 1.4;
-        vy = (Math.random() * 1.8 + 1.6) * cfg.speedMult;
+        vy = (Math.random() * 1.8 + 1.6) * cfg.speedMult * tierSpeedScale;
     } else {
         const side = Math.floor(Math.random() * 4);
         if (side === 0) {
@@ -162,14 +164,21 @@ function createParticle(
 
         const angle = Math.atan2(height / 2 - y, width / 2 - x) + (Math.random() - 0.5) * 0.55;
         const baseSpeed =
-            type === 'helium'
-                ? Math.random() * 1.7 + 2.3
+            type === 'gamma'
+                ? Math.random() * 1.3 + 3.4
+                : type === 'positron'
+                ? Math.random() * 1.1 + 2.35
+                : type === 'helium'
+                ? Math.random() * 1.6 + 2.25
+                : type === 'resonant_alpha'
+                ? Math.random() * 0.7 + 1.35
                 : type === 'alpha'
-                ? Math.random() * 0.5 + 0.85
+                ? Math.random() * 0.5 + 0.9
                 : type === 'shield'
                 ? 1.15
                 : Math.random() * 0.7 + 1.05;
-        const speed = baseSpeed * cfg.speedMult;
+        const isHazard = type === 'helium' || type === 'gamma' || type === 'positron';
+        const speed = baseSpeed * cfg.speedMult * (isHazard ? tierSpeedScale : 1);
         vx = Math.cos(angle) * speed;
         vy = Math.sin(angle) * speed;
     }
@@ -185,6 +194,38 @@ function createParticle(
             color: '#f43f5e',
             glow: 10,
             label: '',
+            elementIdx: 0,
+            pulsePhase: Math.random() * Math.PI * 2,
+        };
+    }
+
+    if (type === 'gamma') {
+        return {
+            x,
+            y,
+            vx,
+            vy,
+            type,
+            radius: 8,
+            color: '#e879f9',
+            glow: 18,
+            label: 'γ',
+            elementIdx: 0,
+            pulsePhase: Math.random() * Math.PI * 2,
+        };
+    }
+
+    if (type === 'positron') {
+        return {
+            x,
+            y,
+            vx,
+            vy,
+            type,
+            radius: 9.5,
+            color: '#fb923c',
+            glow: 16,
+            label: 'β⁺',
             elementIdx: 0,
             pulsePhase: Math.random() * Math.PI * 2,
         };
@@ -206,6 +247,22 @@ function createParticle(
         };
     }
 
+    if (type === 'resonant_alpha') {
+        return {
+            x,
+            y,
+            vx,
+            vy,
+            type,
+            radius: 15,
+            color: '#67e8f9',
+            glow: 24,
+            label: '2α',
+            elementIdx: 0,
+            pulsePhase: Math.random() * Math.PI * 2,
+        };
+    }
+
     if (type === 'shield') {
         return {
             x,
@@ -218,6 +275,22 @@ function createParticle(
             glow: 22,
             label: '◈',
             elementIdx: 0,
+            pulsePhase: Math.random() * Math.PI * 2,
+        };
+    }
+
+    if (type === 'dense_isotope') {
+        return {
+            x,
+            y,
+            vx,
+            vy,
+            type,
+            radius: 17,
+            color: '#fbbf24',
+            glow: 22,
+            label: currentElementIdx >= 10 ? 'Ni*' : 'Fe*',
+            elementIdx: currentElementIdx,
             pulsePhase: Math.random() * Math.PI * 2,
         };
     }
@@ -312,6 +385,7 @@ export default function App() {
     const totalAlphasRef = useRef(0);
     const spectralShiftRef = useRef(0);
     const shieldTimeRef = useRef(0);
+    const disruptTimeRef = useRef(0);
     const ventCooldownRef = useRef(0);
     const invulnTimeRef = useRef(0);
     const flareWarningRef = useRef(0);
@@ -489,6 +563,7 @@ export default function App() {
             totalAlphasRef.current = 0;
             spectralShiftRef.current = 0;
             shieldTimeRef.current = 0;
+            disruptTimeRef.current = 0;
             ventCooldownRef.current = 0;
             invulnTimeRef.current = targetState === 'playing' ? 2.0 : 0;
             flareWarningRef.current = 0;
@@ -542,29 +617,41 @@ export default function App() {
         solarMassRef.current = Math.max(0.5, solarMassRef.current - shed);
         ventCooldownRef.current = 1.6;
 
+        const blastRadius = 220 + elementIndexRef.current * 8;
         const pX = playerRef.current.x;
         const pY = playerRef.current.y;
-        spawnShockwave(pX, pY, 220, '#38bdf8', 4);
+        spawnShockwave(pX, pY, blastRadius, '#38bdf8', 4);
         spawnBurst(pX, pY, '#fbbf24', 14);
-        spawnFloatingText(pX, pY - 36, `-${shed.toFixed(2)} M☉ · SOLAR WIND`, '#38bdf8');
         playSound(240, 'triangle', 0.3, 0.25);
 
-        // Push back & clear Helium particles within blast radius
+        let clearedCount = 0;
         for (let i = particlesRef.current.length - 1; i >= 0; i--) {
             const p = particlesRef.current[i];
             const dx = p.x - pX;
             const dy = p.y - pY;
             const dist = Math.hypot(dx, dy);
-            if (dist < 220) {
-                if (p.type === 'helium') {
-                    spawnBurst(p.x, p.y, '#f43f5e', 5);
+            if (dist < blastRadius) {
+                if (p.type === 'helium' || p.type === 'gamma' || p.type === 'positron') {
+                    spawnBurst(p.x, p.y, p.color, 5);
                     particlesRef.current.splice(i, 1);
+                    clearedCount += 1;
                 } else if (dist > 1) {
                     p.vx += (dx / dist) * 2.5;
                     p.vy += (dy / dist) * 2.5;
                 }
             }
         }
+
+        const bonusHeal = Math.min(12, clearedCount * 3);
+        if (bonusHeal > 0) {
+            stabilityRef.current = Math.min(100, stabilityRef.current + bonusHeal);
+        }
+        spawnFloatingText(
+            pX,
+            pY - 36,
+            bonusHeal > 0 ? `-${shed.toFixed(2)} M☉ · +${bonusHeal}%` : `-${shed.toFixed(2)} M☉ · SOLAR WIND`,
+            '#38bdf8'
+        );
 
         syncHudImmediate();
     }, [playSound, spawnBurst, spawnFloatingText, spawnShockwave, syncHudImmediate]);
@@ -776,11 +863,13 @@ export default function App() {
                 targetPosRef.current.y = clamp(targetPosRef.current.y, 24, canvas.height - 24);
 
                 const curEl = ELEMENTS[elementIndexRef.current];
+                const stage = getStagePhysics(elementIndexRef.current);
 
-                // Momentum Physics Engine (dt-normalized)
+                // Momentum Physics Engine (dt-normalized; Coulomb disruption slows steering briefly)
                 const drag = Math.pow(0.935, dt);
                 const massEffect = 1 + (curEl.radius * cfg.sizeMult) / 110 + (solarMassRef.current - 0.5) * 0.75;
-                const spring = (0.052 / massEffect) * dt;
+                const disruptScale = disruptTimeRef.current > 0 ? 0.58 : 1.0;
+                const spring = (0.052 / massEffect) * disruptScale * dt;
 
                 const ax = (targetPosRef.current.x - playerRef.current.x) * spring;
                 const ay = (targetPosRef.current.y - playerRef.current.y) * spring;
@@ -799,6 +888,9 @@ export default function App() {
                 if (shieldTimeRef.current > 0) {
                     shieldTimeRef.current = Math.max(0, shieldTimeRef.current - dtSec);
                 }
+                if (disruptTimeRef.current > 0) {
+                    disruptTimeRef.current = Math.max(0, disruptTimeRef.current - dtSec);
+                }
                 if (ventCooldownRef.current > 0) {
                     ventCooldownRef.current = Math.max(0, ventCooldownRef.current - dtSec);
                 }
@@ -809,8 +901,20 @@ export default function App() {
                     hitFlashRef.current = Math.max(0, hitFlashRef.current - dtSec * 3.5);
                 }
 
-                // Passive stability recovery
-                stabilityRef.current = Math.min(100, stabilityRef.current + cfg.healingPerSec * dtSec);
+                // Stage-dependent stability balance: early stages heal, late stages suffer endothermic drain
+                if (state === 'playing') {
+                    if (stage.endothermicDrainPerSec > 0) {
+                        const netRate = cfg.healingPerSec * 0.2 - stage.endothermicDrainPerSec;
+                        if (netRate >= 0) {
+                            stabilityRef.current = Math.min(100, stabilityRef.current + netRate * dtSec);
+                        } else {
+                            // Endothermic drain pressures the core down to 5% floor (requires direct hit to collapse)
+                            stabilityRef.current = Math.max(5, stabilityRef.current + netRate * dtSec);
+                        }
+                    } else {
+                        stabilityRef.current = Math.min(100, stabilityRef.current + cfg.healingPerSec * dtSec);
+                    }
+                }
 
                 // Neutron Pulse Countdown
                 if (state === 'neutron') {
@@ -839,15 +943,15 @@ export default function App() {
                 if (flareWarningRef.current > 0) {
                     flareWarningRef.current = Math.max(0, flareWarningRef.current - dtSec);
                     if (flareWarningRef.current === 0) {
-                        flareActiveRef.current = 6.5; // 6.5s active flare
+                        flareActiveRef.current = 6.5;
                         playSound(190, 'sawtooth', 0.8, 0.24);
                     }
                 } else if (flareActiveRef.current > 0) {
                     flareActiveRef.current = Math.max(0, flareActiveRef.current - dtSec);
                 } else if (state === 'playing' && elementIndexRef.current >= 1) {
-                    const flareChancePerSec = 0.028 * cfg.flareRate;
+                    const flareChancePerSec = (0.026 + elementIndexRef.current * 0.002) * cfg.flareRate;
                     if (Math.random() < flareChancePerSec * dtSec) {
-                        flareWarningRef.current = 3.2; // 3.2s warning
+                        flareWarningRef.current = 3.2;
                         spawnNodes();
                         playSound(320, 'sine', 0.45, 0.2);
                     }
@@ -861,26 +965,35 @@ export default function App() {
                     }
                 }
 
-                // Spawn Particles (area-balanced)
+                // Spawn Escalating Hazards & Rewards
                 const isMobile = canvas.width < 640;
                 const areaScalar = clamp((canvas.width * canvas.height) / (1440 * 900), 0.7, 1.35);
                 const flareMult = flareActiveRef.current > 0 ? 2.2 : 1.0;
 
                 if (state === 'playing') {
-                    const heliumRatePerSec =
-                        (0.65 + elementIndexRef.current * 0.42) * cfg.heliumRate * flareMult * areaScalar;
-                    if (Math.random() < heliumRatePerSec * dtSec) {
+                    const totalHazardRatePerSec =
+                        (0.65 + elementIndexRef.current * 0.44) * cfg.heliumRate * flareMult * areaScalar;
+                    if (Math.random() < totalHazardRatePerSec * dtSec) {
+                        const roll = Math.random();
+                        let hazardKind: ParticleKind = 'helium';
+                        if (roll < stage.positronChanceRatio) {
+                            hazardKind = 'positron';
+                        } else if (roll < stage.positronChanceRatio + stage.gammaChanceRatio) {
+                            hazardKind = 'gamma';
+                        }
                         particlesRef.current.push(
-                            createParticle(canvas.width, canvas.height, 'helium', elementIndexRef.current, difficultyRef.current, isMobile)
+                            createParticle(canvas.width, canvas.height, hazardKind, elementIndexRef.current, difficultyRef.current, isMobile)
                         );
                     }
 
                     const alphaBoost = spectralShiftRef.current < -20 ? 1.35 : 1.0;
                     const alphaRatePerSec =
-                        Math.max(0.32, (0.78 - elementIndexRef.current * 0.032) * cfg.alphaRate * alphaBoost);
+                        Math.max(0.38, (0.82 - elementIndexRef.current * 0.028) * cfg.alphaRate * alphaBoost);
                     if (Math.random() < alphaRatePerSec * dtSec) {
+                        const alphaKind: ParticleKind =
+                            Math.random() < stage.resonantAlphaChance ? 'resonant_alpha' : 'alpha';
                         particlesRef.current.push(
-                            createParticle(canvas.width, canvas.height, 'alpha', elementIndexRef.current, difficultyRef.current, isMobile)
+                            createParticle(canvas.width, canvas.height, alphaKind, elementIndexRef.current, difficultyRef.current, isMobile)
                         );
                     }
 
@@ -892,13 +1005,15 @@ export default function App() {
                     }
                 }
 
-                const isotopeRatePerSec = state === 'neutron' ? 7.5 : 0.34 * cfg.isotopeRate;
+                const isotopeRatePerSec = state === 'neutron' ? 7.5 : (0.34 + elementIndexRef.current * 0.015) * cfg.isotopeRate;
                 if (Math.random() < isotopeRatePerSec * dtSec) {
+                    const denseChance = state === 'neutron' ? 0.3 : stage.denseIsotopeChance;
+                    const isoKind: ParticleKind = Math.random() < denseChance ? 'dense_isotope' : 'isotope';
                     particlesRef.current.push(
                         createParticle(
                             canvas.width,
                             canvas.height,
-                            'isotope',
+                            isoKind,
                             state === 'neutron' ? ELEMENTS.length - 1 : elementIndexRef.current,
                             difficultyRef.current,
                             isMobile
@@ -983,10 +1098,12 @@ export default function App() {
                             playSound(560 + node.order * 110, 'sine', 0.12, 0.22);
 
                             if (node.order === 3) {
-                                shieldTimeRef.current = 8;
+                                const shieldDur = 8 + Math.floor(elementIndexRef.current / 4);
+                                shieldTimeRef.current = shieldDur;
+                                stabilityRef.current = Math.min(100, stabilityRef.current + 12 + elementIndexRef.current);
                                 nodesRef.current = [];
-                                spawnShockwave(pX, pY, 120, '#22d3ee', 3);
-                                spawnFloatingText(pX, pY - pR - 14, 'MAGNETIC SHIELD · 8s', '#22d3ee');
+                                spawnShockwave(pX, pY, 150, '#22d3ee', 3);
+                                spawnFloatingText(pX, pY - pR - 14, `OVERCHARGED SHIELD · ${shieldDur}s`, '#22d3ee');
                                 playSound(960, 'triangle', 0.38, 0.32);
                             }
                         }
@@ -995,7 +1112,7 @@ export default function App() {
 
                 // Spectral Time-Dilation & Mass Modifiers
                 const shift = spectralShiftRef.current;
-                const heliumTimeScale = shift < -20 ? 0.65 : shift > 20 ? 1.25 : 1.0;
+                const hazardTimeScale = shift < -20 ? 0.65 : shift > 20 ? 1.25 : 1.0;
                 const isotopeMassMult = shift > 20 ? 1.5 : 1.0;
                 const alphaPullRange = shift < -20 ? 380 : Math.abs(shift) <= 20 ? 220 : 0;
 
@@ -1003,6 +1120,7 @@ export default function App() {
                 for (let i = particlesRef.current.length - 1; i >= 0; i--) {
                     const p = particlesRef.current[i];
                     if (!p) continue;
+                    const isHazard = p.type === 'helium' || p.type === 'gamma' || p.type === 'positron';
 
                     if (!paused) {
                         p.pulsePhase += 0.08 * dt;
@@ -1013,32 +1131,34 @@ export default function App() {
                             p.vy *= boost;
                         }
 
-                        // Gravitational pull on Helium at high mass (> 1.0 M☉)
-                        if (p.type === 'helium' && solarMassRef.current > 1.0) {
+                        // Gravitational infall scales with both core element mass & solar mass
+                        if ((p.type === 'helium' || p.type === 'positron') && (elementIndexRef.current >= 4 || solarMassRef.current > 0.9)) {
                             const dx = pX - p.x;
                             const dy = pY - p.y;
                             const dist = Math.hypot(dx, dy);
-                            if (dist > 1 && dist < 380) {
-                                const pullStrength = (solarMassRef.current - 1.0) * 14;
-                                const force = (pullStrength / Math.max(180, dist)) * 0.045 * dt;
+                            const gravRange = 360 + elementIndexRef.current * 10;
+                            if (dist > 1 && dist < gravRange) {
+                                const coreGrav = elementIndexRef.current * 0.45 + Math.max(0, solarMassRef.current - 0.9) * 12;
+                                const homingExtra = p.type === 'positron' ? 0.032 : 0;
+                                const force = ((coreGrav / Math.max(170, dist)) * 0.042 + homingExtra) * dt;
                                 p.vx += (dx / dist) * force;
                                 p.vy += (dy / dist) * force;
                             }
                         }
 
-                        // Magnetic Alpha Pull (strongest in Blueshift)
-                        if (p.type === 'alpha' && alphaPullRange > 0) {
+                        // Magnetic Alpha Pull (works for both α and 2α)
+                        if ((p.type === 'alpha' || p.type === 'resonant_alpha') && alphaPullRange > 0) {
                             const dx = pX - p.x;
                             const dy = pY - p.y;
                             const dist = Math.hypot(dx, dy);
                             if (dist > 1 && dist < alphaPullRange) {
-                                const pullStrength = shift < -20 ? 0.24 : 0.1;
+                                const pullStrength = shift < -20 ? 0.25 : 0.11;
                                 p.vx += (dx / dist) * pullStrength * dt;
                                 p.vy += (dy / dist) * pullStrength * dt;
                             }
                         }
 
-                        // Soft separation to reduce clumping
+                        // Soft separation
                         for (let j = i - 1; j >= 0; j--) {
                             const other = particlesRef.current[j];
                             if (!other) continue;
@@ -1056,7 +1176,7 @@ export default function App() {
                             }
                         }
 
-                        const moveScale = p.type === 'helium' ? dt * heliumTimeScale : dt;
+                        const moveScale = isHazard ? dt * hazardTimeScale : dt;
                         p.x += p.vx * moveScale;
                         p.y += p.vy * moveScale;
                     }
@@ -1069,7 +1189,6 @@ export default function App() {
                     }
 
                     if (p.type === 'helium') {
-                        // Sharp directional crimson diamond/dart
                         const angle = Math.atan2(p.vy, p.vx);
                         ctx.translate(p.x, p.y);
                         ctx.rotate(angle);
@@ -1081,13 +1200,51 @@ export default function App() {
                         ctx.closePath();
                         ctx.fillStyle = p.color;
                         ctx.fill();
-                    } else if (p.type === 'isotope') {
-                        // Faceted hexagon for mass isotopes
-                        drawPolygon(ctx, p.x, p.y, p.radius, 6, p.pulsePhase * 0.2);
+                    } else if (p.type === 'gamma') {
+                        // Sleek magenta-violet Photodisintegration lance
+                        const angle = Math.atan2(p.vy, p.vx);
+                        ctx.translate(p.x, p.y);
+                        ctx.rotate(angle);
+                        ctx.beginPath();
+                        ctx.moveTo(p.radius * 2.2, 0);
+                        ctx.lineTo(-p.radius * 1.6, p.radius * 0.55);
+                        ctx.lineTo(-p.radius * 1.0, 0);
+                        ctx.lineTo(-p.radius * 1.6, -p.radius * 0.55);
+                        ctx.closePath();
                         ctx.fillStyle = p.color;
                         ctx.fill();
-                        ctx.lineWidth = 1.5;
-                        ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+                        ctx.strokeStyle = '#fae8ff';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    } else if (p.type === 'positron') {
+                        // 4-point crackling Beta+ antimatter star
+                        const rot = p.pulsePhase * 0.6;
+                        ctx.beginPath();
+                        for (let k = 0; k < 8; k++) {
+                            const r = k % 2 === 0 ? p.radius * 1.25 : p.radius * 0.55;
+                            const a = rot + (k * Math.PI) / 4;
+                            const px = p.x + Math.cos(a) * r;
+                            const py = p.y + Math.sin(a) * r;
+                            if (k === 0) ctx.moveTo(px, py);
+                            else ctx.lineTo(px, py);
+                        }
+                        ctx.closePath();
+                        ctx.fillStyle = p.color;
+                        ctx.fill();
+
+                        ctx.shadowBlur = 0;
+                        ctx.fillStyle = '#070d1a';
+                        ctx.font = '700 9px "JetBrains Mono", monospace';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(p.label, p.x, p.y + 0.5);
+                    } else if (p.type === 'isotope' || p.type === 'dense_isotope') {
+                        const sides = p.type === 'dense_isotope' ? 8 : 6;
+                        drawPolygon(ctx, p.x, p.y, p.radius, sides, p.pulsePhase * 0.2);
+                        ctx.fillStyle = p.color;
+                        ctx.fill();
+                        ctx.lineWidth = p.type === 'dense_isotope' ? 2.5 : 1.5;
+                        ctx.strokeStyle = p.type === 'dense_isotope' ? '#fef08a' : 'rgba(255,255,255,0.45)';
                         ctx.stroke();
 
                         ctx.shadowBlur = 0;
@@ -1114,8 +1271,25 @@ export default function App() {
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
                         ctx.fillText(p.label, p.x, p.y + 0.5);
+                    } else if (p.type === 'resonant_alpha') {
+                        const pulse = 1 + Math.sin(p.pulsePhase) * 0.12;
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.radius * pulse, 0, Math.PI * 2);
+                        ctx.fillStyle = p.color;
+                        ctx.fill();
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.radius * 1.3, 0, Math.PI * 2);
+                        ctx.strokeStyle = '#fbbf24';
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+
+                        ctx.shadowBlur = 0;
+                        ctx.fillStyle = '#070d1a';
+                        ctx.font = '700 10px "JetBrains Mono", monospace';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(p.label, p.x, p.y + 0.5);
                     } else {
-                        // Alpha orb with gentle pulse
                         const pulse = 1 + Math.sin(p.pulsePhase) * 0.12;
                         ctx.beginPath();
                         ctx.arc(p.x, p.y, p.radius * pulse, 0, Math.PI * 2);
@@ -1140,24 +1314,52 @@ export default function App() {
                         if (dist < pR + p.radius) {
                             particlesRef.current.splice(i, 1);
 
-                            if (p.type === 'helium') {
-                                if (shieldTimeRef.current > 0 || invulnTimeRef.current > 0) {
+                            if (isHazard) {
+                                if (invulnTimeRef.current > 0) {
                                     spawnBurst(p.x, p.y, '#38bdf8', 6);
                                     playSound(310, 'sine', 0.06, 0.08);
+                                } else if (shieldTimeRef.current > 0) {
+                                    if (p.type === 'gamma') {
+                                        // Gamma rays pierce shield duration!
+                                        shieldTimeRef.current = Math.max(0, shieldTimeRef.current - 1.5);
+                                        spawnBurst(p.x, p.y, '#e879f9', 8);
+                                        spawnFloatingText(pX, pY - pR - 14, 'γ SHIELD PIERCED -1.5s', '#e879f9');
+                                        playSound(220, 'sawtooth', 0.12, 0.18);
+                                    } else {
+                                        spawnBurst(p.x, p.y, '#38bdf8', 6);
+                                        playSound(310, 'sine', 0.06, 0.08);
+                                    }
                                 } else {
-                                    const dmg = 6 + elementIndexRef.current * 0.9;
+                                    const tierIdx = elementIndexRef.current;
+                                    const dmg =
+                                        p.type === 'gamma'
+                                            ? 10 + tierIdx * 1.15
+                                            : p.type === 'positron'
+                                            ? 12 + tierIdx * 1.2
+                                            : 6 + tierIdx * 1.0;
+
                                     stabilityRef.current = Math.max(0, stabilityRef.current - dmg);
-                                    shakeRef.current = 11;
+                                    shakeRef.current = p.type === 'helium' ? 11 : 15;
                                     hitFlashRef.current = 1.0;
 
-                                    // Knockback away from helium hit
-                                    if (dist > 0.1) {
-                                        playerRef.current.vx -= (dx / dist) * 3.5;
-                                        playerRef.current.vy -= (dy / dist) * 3.5;
+                                    if (p.type === 'positron') {
+                                        disruptTimeRef.current = 1.5;
                                     }
 
-                                    spawnBurst(p.x, p.y, '#f43f5e', 10);
-                                    spawnFloatingText(pX, pY - pR - 12, `-${Math.round(dmg)}%`, '#fb7185');
+                                    const kb = p.type === 'positron' ? 5.2 : p.type === 'gamma' ? 4.2 : 3.4;
+                                    if (dist > 0.1) {
+                                        playerRef.current.vx -= (dx / dist) * kb;
+                                        playerRef.current.vy -= (dy / dist) * kb;
+                                    }
+
+                                    spawnBurst(p.x, p.y, p.color, 12);
+                                    const hitLabel =
+                                        p.type === 'gamma'
+                                            ? `-${Math.round(dmg)}% γ RAY`
+                                            : p.type === 'positron'
+                                            ? `-${Math.round(dmg)}% β⁺ DRAG`
+                                            : `-${Math.round(dmg)}%`;
+                                    spawnFloatingText(pX, pY - pR - 12, hitLabel, p.color);
 
                                     if (stabilityRef.current <= 0) {
                                         setRunSummary({
@@ -1173,41 +1375,66 @@ export default function App() {
                                         syncHudImmediate();
                                         playSound(105, 'sawtooth', 0.9, 0.4);
                                     } else {
-                                        playSound(150, 'sine', 0.12, 0.22);
+                                        playSound(p.type === 'helium' ? 150 : 120, 'sawtooth', 0.14, 0.24);
                                     }
                                 }
-                            } else if (p.type === 'isotope') {
-                                const baseMassGain = 0.004 + Math.pow(p.elementIdx, 1.55) * 0.0011;
+                            } else if (p.type === 'isotope' || p.type === 'dense_isotope') {
+                                const isDense = p.type === 'dense_isotope';
+                                const baseMassGain = isDense
+                                    ? 0.095
+                                    : 0.008 + Math.pow(p.elementIdx, 1.45) * 0.0014;
                                 const massGain = baseMassGain * isotopeMassMult;
+                                const healAmount = isDense ? 14 : 4 + Math.floor(elementIndexRef.current * 0.55);
+
                                 solarMassRef.current = Math.min(2.0, solarMassRef.current + massGain);
                                 peakMassRef.current = Math.max(peakMassRef.current, solarMassRef.current);
-                                stabilityRef.current = Math.min(100, stabilityRef.current + 4);
+                                stabilityRef.current = Math.min(100, stabilityRef.current + healAmount);
 
-                                spawnBurst(p.x, p.y, p.color, 9);
+                                spawnBurst(p.x, p.y, p.color, isDense ? 14 : 9);
                                 spawnFloatingText(
                                     pX,
                                     pY - pR - 10,
-                                    `+${massGain.toFixed(2)} M☉${isotopeMassMult > 1 ? ' (1.5×)' : ''}`,
+                                    `+${massGain.toFixed(2)} M☉ · +${healAmount}%${isotopeMassMult > 1 ? ' (1.5×)' : ''}`,
                                     p.color
                                 );
-                                playSound(780, 'sine', 0.1, 0.18);
+                                playSound(isDense ? 920 : 780, 'sine', 0.14, 0.22);
                             } else if (p.type === 'shield') {
-                                shieldTimeRef.current = 8;
-                                stabilityRef.current = Math.min(100, stabilityRef.current + 10);
-                                spawnShockwave(pX, pY, 100, '#22d3ee', 3);
-                                spawnFloatingText(pX, pY - pR - 14, 'SHIELD 8s · +10%', '#22d3ee');
+                                const shieldDur = 8 + Math.floor(elementIndexRef.current / 4);
+                                shieldTimeRef.current = shieldDur;
+                                stabilityRef.current = Math.min(100, stabilityRef.current + 12);
+                                // Clear nearby hazards on shield pickup
+                                for (let k = particlesRef.current.length - 1; k >= 0; k--) {
+                                    const other = particlesRef.current[k];
+                                    if (
+                                        (other.type === 'helium' || other.type === 'gamma' || other.type === 'positron') &&
+                                        Math.hypot(other.x - pX, other.y - pY) < 130
+                                    ) {
+                                        particlesRef.current.splice(k, 1);
+                                    }
+                                }
+                                spawnShockwave(pX, pY, 130, '#22d3ee', 3);
+                                spawnFloatingText(pX, pY - pR - 14, `SHIELD ${shieldDur}s · +12%`, '#22d3ee');
                                 playSound(1150, 'sine', 0.28, 0.3);
                             } else {
-                                // Alpha Captured
-                                totalAlphasRef.current += 1;
-                                spawnBurst(p.x, p.y, '#38bdf8', 10);
-                                playSound(440 + alphasCapturedRef.current * 65, 'triangle', 0.18, 0.24);
+                                // Alpha or Resonant 2α Captured
+                                const isResonant = p.type === 'resonant_alpha';
+                                const alphaSteps = isResonant ? 2 : 1;
+                                const healBonus = isResonant ? 12 : 4 + Math.floor(elementIndexRef.current * 0.5);
+
+                                totalAlphasRef.current += alphaSteps;
+                                stabilityRef.current = Math.min(100, stabilityRef.current + healBonus);
+                                if (isResonant) {
+                                    solarMassRef.current = Math.min(2.0, solarMassRef.current + 0.02);
+                                    peakMassRef.current = Math.max(peakMassRef.current, solarMassRef.current);
+                                }
+
+                                spawnBurst(p.x, p.y, isResonant ? '#fbbf24' : '#38bdf8', isResonant ? 14 : 10);
+                                playSound(isResonant ? 680 : 440 + alphasCapturedRef.current * 65, 'triangle', 0.2, 0.26);
 
                                 if (state === 'neutron') {
-                                    stabilityRef.current = Math.min(100, stabilityRef.current + 4);
-                                    spawnFloatingText(pX, pY - pR - 10, '+4% STABILITY', '#38bdf8');
+                                    spawnFloatingText(pX, pY - pR - 10, `+${healBonus}% STABILITY`, '#38bdf8');
                                 } else {
-                                    const nextAlphas = alphasCapturedRef.current + 1;
+                                    const nextAlphas = alphasCapturedRef.current + alphaSteps;
                                     const req = curEl.alphasRequired;
 
                                     if (nextAlphas >= req) {
@@ -1215,7 +1442,6 @@ export default function App() {
                                         alphasCapturedRef.current = 0;
 
                                         if (isFinalEvolution) {
-                                            // Enter Neutron Pulse Final Sprint
                                             gameStateRef.current = 'neutron';
                                             setGameState('neutron');
                                             stabilityRef.current = 100;
@@ -1225,13 +1451,12 @@ export default function App() {
                                             flareWarningRef.current = 0;
                                             flareActiveRef.current = 0;
 
-                                            // Clear Helium and flood Isotopes for final push
                                             const burstIsotopes: SimParticle[] = [];
                                             for (let k = 0; k < 75; k++) {
                                                 const np = createParticle(
                                                     canvas.width,
                                                     canvas.height,
-                                                    'isotope',
+                                                    Math.random() < 0.25 ? 'dense_isotope' : 'isotope',
                                                     ELEMENTS.length - 1,
                                                     difficultyRef.current,
                                                     canvas.width < 640
@@ -1247,7 +1472,6 @@ export default function App() {
                                             playSound(1040, 'square', 0.45, 0.3);
                                             syncHudImmediate();
                                         } else {
-                                            // Smooth non-blocking evolution with shockwave + grace window
                                             const nextIdx = elementIndexRef.current + 1;
                                             const nextEl = ELEMENTS[nextIdx];
                                             elementIndexRef.current = nextIdx;
@@ -1255,23 +1479,22 @@ export default function App() {
                                             invulnTimeRef.current = 2.0;
                                             solarMassRef.current = Math.min(
                                                 2.0,
-                                                solarMassRef.current + 0.008 * Math.pow(1.08, nextIdx)
+                                                solarMassRef.current + 0.01 * Math.pow(1.08, nextIdx)
                                             );
                                             peakMassRef.current = Math.max(peakMassRef.current, solarMassRef.current);
 
-                                            // Clear nearby Helium hazards on fusion shockwave
                                             for (let k = particlesRef.current.length - 1; k >= 0; k--) {
                                                 const other = particlesRef.current[k];
                                                 if (
-                                                    other.type === 'helium' &&
-                                                    Math.hypot(other.x - pX, other.y - pY) < 280
+                                                    (other.type === 'helium' || other.type === 'gamma' || other.type === 'positron') &&
+                                                    Math.hypot(other.x - pX, other.y - pY) < 300
                                                 ) {
-                                                    spawnBurst(other.x, other.y, '#f43f5e', 4);
+                                                    spawnBurst(other.x, other.y, other.color, 4);
                                                     particlesRef.current.splice(k, 1);
                                                 }
                                             }
 
-                                            spawnShockwave(pX, pY, 260, nextEl.color, 4);
+                                            spawnShockwave(pX, pY, 280, nextEl.color, 4);
                                             spawnFloatingText(pX, pY - pR - 16, `FUSED → ${nextEl.name.toUpperCase()}`, nextEl.color);
                                             unlockElementInCodex(nextEl.symbol);
                                             showEvolutionOverlay(nextEl);
@@ -1280,7 +1503,12 @@ export default function App() {
                                         }
                                     } else {
                                         alphasCapturedRef.current = nextAlphas;
-                                        spawnFloatingText(pX, pY - pR - 10, `${nextAlphas}/${req} α`, '#38bdf8');
+                                        spawnFloatingText(
+                                            pX,
+                                            pY - pR - 10,
+                                            isResonant ? `2α RESONANCE (${nextAlphas}/${req}) · +${healBonus}%` : `${nextAlphas}/${req} α · +${healBonus}%`,
+                                            isResonant ? '#67e8f9' : '#38bdf8'
+                                        );
                                     }
                                 }
                             }
@@ -1362,7 +1590,7 @@ export default function App() {
                     }
                 }
 
-                // Shield Aura
+                // Shield / Coulomb Disruption / Grace Aura
                 if (shieldTimeRef.current > 0) {
                     ctx.save();
                     ctx.strokeStyle = '#22d3ee';
@@ -1373,8 +1601,16 @@ export default function App() {
                     ctx.arc(pX, pY, pR + 14, 0, Math.PI * 2);
                     ctx.stroke();
                     ctx.restore();
+                } else if (disruptTimeRef.current > 0) {
+                    ctx.save();
+                    ctx.strokeStyle = '#fb923c';
+                    ctx.setLineDash([3, 5]);
+                    ctx.lineWidth = 2.5;
+                    ctx.beginPath();
+                    ctx.arc(pX, pY, pR + 14, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
                 } else if (invulnTimeRef.current > 0) {
-                    // Grace invulnerability ring
                     ctx.save();
                     ctx.strokeStyle = 'rgba(255,255,255,0.45)';
                     ctx.setLineDash([4, 4]);
@@ -1604,8 +1840,17 @@ export default function App() {
                         </div>
                     </div>
 
-                    {/* Right Side: Spectral State & Active Shield */}
-                    <div className="flex items-center justify-between sm:justify-end gap-3">
+                    {/* Right Side: Burning Era, Spectral State & Active Shield */}
+                    <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2.5">
+                        <div className="bg-slate-900/75 backdrop-blur-xl px-3.5 py-2 rounded-xl border border-white/10 text-xs font-mono">
+                            <span className="text-slate-300">{getStagePhysics(elementIndex).eraLabel}</span>
+                            {getStagePhysics(elementIndex).endothermicDrainPerSec > 0 && (
+                                <span className="text-rose-400 ml-2">
+                                    · Drain -{getStagePhysics(elementIndex).endothermicDrainPerSec.toFixed(1)}%/s
+                                </span>
+                            )}
+                        </div>
+
                         <div className="bg-slate-900/75 backdrop-blur-xl px-3.5 py-2 rounded-xl border border-white/10 text-xs font-mono">
                             <span className={spectralStateColor}>{spectralStateLabel}</span>
                         </div>
@@ -1620,7 +1865,7 @@ export default function App() {
                                     <div className="w-24 h-1 bg-sky-900 rounded-full mt-1 overflow-hidden">
                                         <div
                                             className="h-full bg-sky-400"
-                                            style={{ width: `${(shieldTime / 8) * 100}%` }}
+                                            style={{ width: `${(shieldTime / (8 + Math.floor(elementIndex / 4))) * 100}%` }}
                                         />
                                     </div>
                                 </div>
@@ -2263,23 +2508,31 @@ export default function App() {
                                         </div>
 
                                         <div className="bg-white/[0.04] p-4 rounded-2xl border border-white/10 space-y-2 text-sm text-slate-300">
-                                            <p className="font-semibold text-white">Particles &amp; Flares</p>
+                                            <p className="font-semibold text-white">Escalating Rewards &amp; Penalties</p>
                                             <ul className="text-xs text-slate-400 space-y-1.5">
                                                 <li>
-                                                    • <span className="text-sky-400 font-semibold">Blue α Orbs:</span>{' '}
-                                                    Advance your core from Carbon (C) up to Iron (Fe).
+                                                    • <span className="text-sky-400 font-semibold">α &amp; 2α Resonance:</span>{' '}
+                                                    Blue α (+1) and high-tier cyan-gold 2α (+2 steps, +12% Stability).
                                                 </li>
                                                 <li>
-                                                    • <span className="text-amber-300 font-semibold">Hex Isotopes:</span>{' '}
-                                                    Increase your Solar Mass (M☉) and heal +4% Stability.
+                                                    • <span className="text-amber-300 font-semibold">Hex &amp; Dense Ni*/Fe*:</span>{' '}
+                                                    Scale up mass &amp; healing in late burning stages.
                                                 </li>
                                                 <li>
-                                                    • <span className="text-rose-400 font-semibold">Red Shards:</span>{' '}
-                                                    Helium-4 squall hazards that drain Stability on impact.
+                                                    • <span className="text-rose-400 font-semibold">He-4 Shards:</span>{' '}
+                                                    Squall hazards; gravitational infall intensifies as your core grows.
+                                                </li>
+                                                <li>
+                                                    • <span className="text-fuchsia-400 font-semibold">γ Gamma Rays (Mg+):</span>{' '}
+                                                    Fast photodisintegration lances that pierce 1.5s off shields.
+                                                </li>
+                                                <li>
+                                                    • <span className="text-orange-400 font-semibold">β⁺ Positrons (S+):</span>{' '}
+                                                    Curving antimatter sparks that apply brief Coulomb steering drag.
                                                 </li>
                                                 <li>
                                                     • <span className="text-cyan-300 font-semibold">Nodes 1 → 2 → 3:</span>{' '}
-                                                    Trace numbered rings during Solar Flares for an 8s Magnetic Shield.
+                                                    Trace numbered rings during flares for an Overcharged Magnetic Shield.
                                                 </li>
                                             </ul>
                                         </div>
