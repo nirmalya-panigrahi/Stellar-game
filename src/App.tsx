@@ -1,626 +1,1467 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
- * 
- * THE HEART OF THE MAIN SEQUENCE
- * A poetic astrophysical evolution game.
+ *
+ * STELLAR — The Nucleosynthesis Engine
+ * A poetic astrophysical survival and evolution game.
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, Zap, Sparkles, Activity, Volume2, VolumeX, AlertCircle, Scale, Gem, Flame, ArrowRight, Pause, Play, HelpCircle, ChevronDown, ChevronUp, BookOpen, Atom, Cpu } from 'lucide-react';
+import {
+    Shield,
+    Activity,
+    Volume2,
+    VolumeX,
+    AlertCircle,
+    Scale,
+    Gem,
+    Flame,
+    ArrowRight,
+    Pause,
+    Play,
+    HelpCircle,
+    ChevronDown,
+    ChevronUp,
+    BookOpen,
+    Atom,
+    Wind,
+    X,
+    RotateCcw,
+    Library,
+} from 'lucide-react';
+import {
+    ELEMENTS,
+    DESTINY_POEMS,
+    DIFFICULTY_CONFIG,
+    Difficulty,
+    GameState,
+    Destiny,
+    ParticleKind,
+    CodexProgress,
+    loadCodex,
+    saveCodex,
+    playTone,
+} from './gameData';
 
-// --- AUDIO ENGINE ---
-const createAudioContext = () => {
-    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-    return new AudioContext();
-};
-
-let audioCtx: AudioContext | null = null;
-
-const playTone = (freq: number, type: OscillatorType, duration: number, volume: number) => {
-    if (!audioCtx) audioCtx = createAudioContext();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    const now = audioCtx.currentTime;
-    
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, now);
-    gain.gain.setValueAtTime(volume, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
-    
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    
-    osc.start();
-    osc.stop(now + duration);
-};
-
-// --- CONSTANTS ---
-const MIDNIGHT_NAVY = '#0f172a';
-const HELIUM_RED = '#f43f5e';
-const ALPHA_BLUE = '#38bdf8';
-
-const ELEMENTS = [
-    { symbol: 'C', mass: 12, name: 'Carbon', color: '#f59e0b', radius: 32 },
-    { symbol: 'O', mass: 16, name: 'Oxygen', color: '#38bdf8', radius: 34, poem: ["The very breath that sustains my frame", "Is forged in the heat of your sacred flame."] },
-    { symbol: 'Ne', mass: 20, name: 'Neon', color: '#ff4d00', radius: 36, poem: ["Like neon signs in a midnight street", "My heart glows bright whenever we meet."] },
-    { symbol: 'Mg', mass: 24, name: 'Magnesium', color: '#ffffff', radius: 38, poem: ["A brilliance caught in a sudden spark", "You light the path within the dark."] },
-    { symbol: 'Si', mass: 28, name: 'Silicon', color: '#475569', radius: 40, poem: ["Stone and glass and ancient earth", "From your solid step, the worlds find birth."] },
-    { symbol: 'S', mass: 32, name: 'Sulfur', color: '#fbbf24', radius: 41, poem: ["Yellow dust in the cosmic wind", "Where transformation's soul is pinned."] },
-    { symbol: 'Ar', mass: 36, name: 'Argon', color: '#a855f7', radius: 42, poem: ["Silent, noble, drifting free", "A ghost of light in a velvet sea."] },
-    { symbol: 'Ca', mass: 40, name: 'Calcium', color: '#f97316', radius: 43, poem: ["The bone that builds the strength of life", "Unyielding force through starlit strife."] },
-    { symbol: 'Ti', mass: 44, name: 'Titanium', color: '#cbd5e1', radius: 44, poem: ["Strength of gods and steel of suns", "Where the river of creation runs."] },
-    { symbol: 'Cr', mass: 48, name: 'Chromium', color: '#94a3b8', radius: 45, poem: ["Gleaming silver, polished bright", "Mirroring the stars of night."] },
-    { symbol: 'Mn', mass: 52, name: 'Manganese', color: '#64748b', radius: 46, poem: ["The subtle shift, the hidden weight", "Before the door of iron fate."] },
-    { symbol: 'Fe', mass: 56, name: 'Iron', color: '#b91c1c', radius: 47, poem: ["The final bond where all currents cease", "In your steady core, I find my peace."] },
-];
-
-const GOLD_ELEMENT = { symbol: 'Au', mass: 197, name: 'Gold', color: '#fbbf24', radius: 80, poem: ["Born of a crash where the heavens fold", "A love this rare is paved in gold."] };
-
-// --- UTILS ---
-class Particle {
+interface SimParticle {
     x: number;
     y: number;
     vx: number;
     vy: number;
-    type: 'helium' | 'alpha' | 'isotope' | 'shield';
+    type: ParticleKind;
     radius: number;
     color: string;
     glow: number;
-    label: string = '';
+    label: string;
+    elementIdx: number;
+    pulsePhase: number;
+}
 
-    constructor(canvas: HTMLCanvasElement, type: 'helium' | 'alpha' | 'isotope' | 'shield', currentElementIdx: number, difficulty: 'Nebula' | 'Stellar' | 'Quasar') {
-        this.type = type;
-        const isMobile = window.innerWidth < 640;
-        const diffMultiplier = difficulty === 'Nebula' ? 0.7 : (difficulty === 'Quasar' ? 1.3 : 1.0);
-        
-        if (isMobile && type === 'helium') {
-            // Mobile specific: Helium streams from the top
-            this.x = Math.random() * canvas.width;
-            this.y = -20;
-            this.vx = (Math.random() - 0.5) * 1.5;
-            this.vy = (Math.random() * 2 + 1.5) * diffMultiplier;
+interface ConvectionNode {
+    x: number;
+    y: number;
+    order: number;
+    reached: boolean;
+}
+
+interface Shockwave {
+    x: number;
+    y: number;
+    radius: number;
+    maxRadius: number;
+    color: string;
+    alpha: number;
+    lineWidth: number;
+}
+
+interface BurstSpark {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    radius: number;
+    color: string;
+    life: number;
+    maxLife: number;
+}
+
+interface FloatingText {
+    x: number;
+    y: number;
+    vy: number;
+    text: string;
+    color: string;
+    life: number;
+    maxLife: number;
+}
+
+interface BgStar {
+    x: number;
+    y: number;
+    size: number;
+    depth: number;
+    alpha: number;
+}
+
+interface EvolutionBanner {
+    symbol: string;
+    name: string;
+    mass: number;
+    color: string;
+    poem: [string, string];
+}
+
+interface RunSummary {
+    finalElement: string;
+    finalSymbol: string;
+    peakMass: number;
+    alphasFused: number;
+    timeSurvivedSec: number;
+    difficulty: Difficulty;
+}
+
+function clamp(val: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, val));
+}
+
+function createParticle(
+    width: number,
+    height: number,
+    type: ParticleKind,
+    currentElementIdx: number,
+    difficulty: Difficulty,
+    isMobile: boolean
+): SimParticle {
+    const cfg = DIFFICULTY_CONFIG[difficulty];
+    let x = 0;
+    let y = 0;
+    let vx = 0;
+    let vy = 0;
+
+    if (isMobile && type === 'helium') {
+        x = Math.random() * width;
+        y = -20;
+        vx = (Math.random() - 0.5) * 1.4;
+        vy = (Math.random() * 1.8 + 1.6) * cfg.speedMult;
+    } else {
+        const side = Math.floor(Math.random() * 4);
+        if (side === 0) {
+            x = Math.random() * width;
+            y = -24;
+        } else if (side === 1) {
+            x = width + 24;
+            y = Math.random() * height;
+        } else if (side === 2) {
+            x = Math.random() * width;
+            y = height + 24;
         } else {
-            const side = Math.floor(Math.random() * 4);
-            if (side === 0) { this.x = Math.random() * canvas.width; this.y = -20; }
-            else if (side === 1) { this.x = canvas.width + 20; this.y = Math.random() * canvas.height; }
-            else if (side === 2) { this.x = Math.random() * canvas.width; this.y = canvas.height + 20; }
-            else { this.x = -20; this.y = Math.random() * canvas.height; }
-
-            const angle = Math.atan2(canvas.height / 2 - this.y, canvas.width / 2 - this.x) + (Math.random() - 0.5) * 0.5;
-            const baseSpeed = type === 'helium' ? Math.random() * 2 + 2.5 : (type === 'alpha' ? Math.random() * 0.5 + 0.8 : (type === 'shield' ? 1.2 : Math.random() * 0.8 + 1.0));
-            const speed = baseSpeed * diffMultiplier;
-            this.vx = Math.cos(angle) * speed;
-            this.vy = Math.sin(angle) * speed;
+            x = -24;
+            y = Math.random() * height;
         }
 
-        if (type === 'helium') {
-            this.radius = 4;
-            this.color = HELIUM_RED;
-            this.glow = 0;
-        } else if (type === 'alpha') {
-            this.radius = 12;
-            this.color = ALPHA_BLUE;
-            this.glow = 15;
-        } else if (type === 'shield') {
-            this.radius = 14;
-            this.color = '#38bdf8';
-            this.label = '◈';
-            this.glow = 25;
-        } else {
-            this.radius = 15;
-            // For gaining mass, only use unlocked elements (current and previous)
-            const availableIndices = Array.from({ length: currentElementIdx + 1 }, (_, i) => i);
-            
-            // During Neutron pulse, prioritize heavy elements for mass gain
-            let targetIdx;
-            if (currentElementIdx >= ELEMENTS.length - 1 && Math.random() > 0.3) {
-                // 70% chance to be the heaviest available element (Iron) during endgame
-                targetIdx = currentElementIdx;
-            } else {
-                targetIdx = availableIndices[Math.floor(Math.random() * availableIndices.length)];
-            }
-            
-            const element = ELEMENTS[targetIdx];
-            
-            this.color = element.color;
-            this.label = element.symbol;
-            this.glow = 20;
-        }
+        const angle = Math.atan2(height / 2 - y, width / 2 - x) + (Math.random() - 0.5) * 0.55;
+        const baseSpeed =
+            type === 'helium'
+                ? Math.random() * 1.7 + 2.3
+                : type === 'alpha'
+                ? Math.random() * 0.5 + 0.85
+                : type === 'shield'
+                ? 1.15
+                : Math.random() * 0.7 + 1.05;
+        const speed = baseSpeed * cfg.speedMult;
+        vx = Math.cos(angle) * speed;
+        vy = Math.sin(angle) * speed;
     }
 
-    update() {
-        this.x += this.vx;
-        this.y += this.vy;
+    if (type === 'helium') {
+        return {
+            x,
+            y,
+            vx,
+            vy,
+            type,
+            radius: 6.5,
+            color: '#f43f5e',
+            glow: 10,
+            label: '',
+            elementIdx: 0,
+            pulsePhase: Math.random() * Math.PI * 2,
+        };
     }
 
-    draw(ctx: CanvasRenderingContext2D) {
-        ctx.save();
-        if (this.glow > 0) {
-            ctx.shadowBlur = this.glow;
-            ctx.shadowColor = this.color;
-        }
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.fill();
-
-        if (this.label) {
-            ctx.fillStyle = MIDNIGHT_NAVY;
-            ctx.font = 'bold 10px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(this.label, this.x, this.y);
-        }
-        ctx.restore();
+    if (type === 'alpha') {
+        return {
+            x,
+            y,
+            vx,
+            vy,
+            type,
+            radius: 13,
+            color: '#38bdf8',
+            glow: 16,
+            label: 'α',
+            elementIdx: 0,
+            pulsePhase: Math.random() * Math.PI * 2,
+        };
     }
+
+    if (type === 'shield') {
+        return {
+            x,
+            y,
+            vx,
+            vy,
+            type,
+            radius: 15,
+            color: '#22d3ee',
+            glow: 22,
+            label: '◈',
+            elementIdx: 0,
+            pulsePhase: Math.random() * Math.PI * 2,
+        };
+    }
+
+    const availableMax = Math.min(currentElementIdx, ELEMENTS.length - 1);
+    const targetIdx =
+        availableMax >= ELEMENTS.length - 1 && Math.random() > 0.3
+            ? availableMax
+            : Math.floor(Math.random() * (availableMax + 1));
+    const el = ELEMENTS[targetIdx];
+
+    return {
+        x,
+        y,
+        vx,
+        vy,
+        type,
+        radius: 15,
+        color: el.color,
+        glow: 16,
+        label: el.symbol,
+        elementIdx: targetIdx,
+        pulsePhase: Math.random() * Math.PI * 2,
+    };
+}
+
+function drawPolygon(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    radius: number,
+    sides: number,
+    rotation = 0
+) {
+    ctx.beginPath();
+    for (let i = 0; i < sides; i++) {
+        const a = rotation + (i * Math.PI * 2) / sides;
+        const px = x + Math.cos(a) * radius;
+        const py = y + Math.sin(a) * radius;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
 }
 
 export default function App() {
-    const [gameState, setGameState] = useState<'intro' | 'playing' | 'evolving' | 'collapsed' | 'ascended' | 'neutron'>('intro');
-    const [difficulty, setDifficulty] = useState<'Nebula' | 'Stellar' | 'Quasar'>('Stellar');
-    const [stability, setStability] = useState(100);
-    const [elementIndex, setElementIndex] = useState(0);
+    const [gameState, setGameState] = useState<GameState>('intro');
+    const [difficulty, setDifficulty] = useState<Difficulty>('Stellar');
     const [isMuted, setIsMuted] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
-    const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
-    const [showHelp, setShowHelp] = useState(false);
-    const [showNerdScience, setShowNerdScience] = useState(false);
-
-    const [spectralShift, setSpectralShift] = useState(0); // -100 (Blue/Slow) to 100 (Red/Fast)
-    const [shieldTime, setShieldTime] = useState(0);
-    const [nodes, setNodes] = useState<{ x: number, y: number, order: number, reached: boolean }[]>([]);
-    const [nextNodeOrder, setNextNodeOrder] = useState(1);
+    // HUD React state (synced cleanly from simulation refs)
+    const [stability, setStability] = useState(100);
+    const [elementIndex, setElementIndex] = useState(0);
     const [solarMass, setSolarMass] = useState(0.5);
-    const [destiny, setDestiny] = useState<null | 'dwarf' | 'supernova'>(null);
-
     const [alphasCaptured, setAlphasCaptured] = useState(0);
+    const [spectralShift, setSpectralShift] = useState(0);
+    const [shieldTime, setShieldTime] = useState(0);
+    const [ventCooldown, setVentCooldown] = useState(0);
+    const [flareWarning, setFlareWarning] = useState(0);
+    const [flareActive, setFlareActive] = useState(0);
     const [neutronTimeLeft, setNeutronTimeLeft] = useState(0);
-    const [flareWarning, setFlareWarning] = useState(0); // 0 to 1
-    const [flareActive, setFlareActive] = useState(0); // 0 to 1
+    const [destiny, setDestiny] = useState<Destiny>(null);
+    const [evolutionBanner, setEvolutionBanner] = useState<EvolutionBanner | null>(null);
+    const [showStartHint, setShowStartHint] = useState(false);
+    const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
+
+    // Modals & Codex
+    const [showHelp, setShowHelp] = useState(false);
+    const [showCodex, setShowCodex] = useState(false);
+    const [showNerdScience, setShowNerdScience] = useState(false);
+    const [codex, setCodex] = useState<CodexProgress>(() => loadCodex());
+
+    // Simulation refs (single source of truth inside requestAnimationFrame)
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const particlesRef = useRef<Particle[]>([]);
-    const trailRef = useRef<{x: number, y: number, size: number}[]>([]);
-    const frameRef = useRef<number>(0);
+    const gameStateRef = useRef<GameState>('intro');
+    const difficultyRef = useRef<Difficulty>('Stellar');
+    const isPausedRef = useRef(false);
+    const isMutedRef = useRef(false);
+    const wasPausedBeforeModalRef = useRef(false);
+
     const playerRef = useRef({ x: 0, y: 0, vx: 0, vy: 0 });
-    const lastNodeSpawnRef = useRef<number>(Date.now());
-    const currentElement = ELEMENTS[elementIndex];
+    const targetPosRef = useRef({ x: 0, y: 0 });
+    const touchLastRef = useRef<{ x: number; y: number } | null>(null);
+    const keysPressedRef = useRef<Set<string>>(new Set());
+
+    const stabilityRef = useRef(100);
+    const solarMassRef = useRef(0.5);
+    const peakMassRef = useRef(0.5);
+    const elementIndexRef = useRef(0);
+    const alphasCapturedRef = useRef(0);
+    const totalAlphasRef = useRef(0);
+    const spectralShiftRef = useRef(0);
+    const shieldTimeRef = useRef(0);
+    const ventCooldownRef = useRef(0);
+    const invulnTimeRef = useRef(0);
+    const flareWarningRef = useRef(0);
+    const flareActiveRef = useRef(0);
+    const neutronTimeLeftRef = useRef(0);
+    const nodeTimerRef = useRef(0);
+    const runElapsedRef = useRef(0);
+
+    const particlesRef = useRef<SimParticle[]>([]);
+    const nodesRef = useRef<ConvectionNode[]>([]);
+    const nextNodeOrderRef = useRef(1);
+    const trailRef = useRef<{ x: number; y: number; size: number }[]>([]);
+    const shockwavesRef = useRef<Shockwave[]>([]);
+    const burstSparksRef = useRef<BurstSpark[]>([]);
+    const floatingTextsRef = useRef<FloatingText[]>([]);
+    const bgStarsRef = useRef<BgStar[]>([]);
+
+    const shakeRef = useRef(0);
+    const hitFlashRef = useRef(0);
+    const bannerTimeoutRef = useRef<number | null>(null);
+    const hintTimeoutRef = useRef<number | null>(null);
+    const frameRef = useRef<number>(0);
+
+    // Keep synced mirrors of settings
+    useEffect(() => {
+        gameStateRef.current = gameState;
+    }, [gameState]);
+
+    useEffect(() => {
+        difficultyRef.current = difficulty;
+    }, [difficulty]);
+
+    useEffect(() => {
+        isPausedRef.current = isPaused;
+    }, [isPaused]);
+
+    useEffect(() => {
+        isMutedRef.current = isMuted;
+    }, [isMuted]);
 
     const playSound = useCallback((freq: number, type: OscillatorType, duration: number, volume: number) => {
-        if (!isMuted) playTone(freq, type, duration, volume);
-    }, [isMuted]);
+        if (!isMutedRef.current) {
+            playTone(freq, type, duration, volume);
+        }
+    }, []);
+
+    const unlockElementInCodex = useCallback((symbol: string) => {
+        setCodex(prev => {
+            if (prev.unlockedElements.includes(symbol)) return prev;
+            const next: CodexProgress = {
+                ...prev,
+                unlockedElements: [...prev.unlockedElements, symbol],
+            };
+            saveCodex(next);
+            return next;
+        });
+    }, []);
+
+    const unlockEndingInCodex = useCallback((ending: 'dwarf' | 'supernova') => {
+        setCodex(prev => {
+            if (prev.endings.includes(ending)) return prev;
+            const next: CodexProgress = {
+                ...prev,
+                endings: [...prev.endings, ending],
+            };
+            saveCodex(next);
+            return next;
+        });
+    }, []);
+
+    const spawnBurst = useCallback((x: number, y: number, color: string, count = 12) => {
+        for (let i = 0; i < count; i++) {
+            const angle = (Math.PI * 2 * i) / count + Math.random() * 0.4;
+            const speed = Math.random() * 3.2 + 1.2;
+            burstSparksRef.current.push({
+                x,
+                y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                radius: Math.random() * 2.5 + 1.5,
+                color,
+                life: 0.45,
+                maxLife: 0.45,
+            });
+        }
+    }, []);
+
+    const spawnShockwave = useCallback((x: number, y: number, maxRadius: number, color: string, lineWidth = 3) => {
+        shockwavesRef.current.push({
+            x,
+            y,
+            radius: 16,
+            maxRadius,
+            color,
+            alpha: 0.9,
+            lineWidth,
+        });
+    }, []);
+
+    const spawnFloatingText = useCallback((x: number, y: number, text: string, color: string) => {
+        floatingTextsRef.current.push({
+            x,
+            y,
+            vy: -1.1,
+            text,
+            color,
+            life: 1.0,
+            maxLife: 1.0,
+        });
+    }, []);
 
     const spawnNodes = useCallback(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const newNodes = Array.from({ length: 3 }).map((_, i) => ({
-            x: Math.random() * (canvas.width - 200) + 100,
-            y: Math.random() * (canvas.height - 200) + 100,
-            order: i + 1,
-            reached: false
+        const padX = Math.min(140, canvas.width * 0.18);
+        const padTop = 130;
+        const padBottom = 140;
+        const usableW = Math.max(120, canvas.width - padX * 2);
+        const usableH = Math.max(120, canvas.height - padTop - padBottom);
+
+        const created: ConvectionNode[] = [1, 2, 3].map(order => ({
+            x: padX + Math.random() * usableW,
+            y: padTop + Math.random() * usableH,
+            order,
+            reached: false,
         }));
-        setNodes(newNodes);
-        setNextNodeOrder(1);
-        lastNodeSpawnRef.current = Date.now();
+        nodesRef.current = created;
+        nextNodeOrderRef.current = 1;
+        nodeTimerRef.current = 14; // 14s window to complete nodes
     }, []);
 
-    // Neutron Pulse Countdown
-    useEffect(() => {
-        let interval: any;
-        if (gameState === 'neutron' && neutronTimeLeft > 0 && !isPaused) {
-            interval = setInterval(() => {
-                setNeutronTimeLeft(prev => {
-                    const next = Math.max(0, prev - 0.1);
-                    if (next <= 0) {
-                        setGameState('ascended');
-                        // Calculate final destiny after pulse
-                        setSolarMass(finalMass => {
-                            if (finalMass >= 1.4) {
-                                setDestiny('supernova');
-                            } else {
-                                setDestiny('dwarf');
-                            }
-                            return finalMass;
-                        });
-                        playSound(880, 'sine', 2, 0.5);
-                    }
-                    return next;
-                });
-            }, 100);
-        }
-        return () => clearInterval(interval);
-    }, [gameState, neutronTimeLeft, isPaused, playSound]);
+    const showEvolutionOverlay = useCallback((el: typeof ELEMENTS[number]) => {
+        setEvolutionBanner({
+            symbol: el.symbol,
+            name: el.name,
+            mass: el.mass,
+            color: el.color,
+            poem: el.poem,
+        });
+        if (bannerTimeoutRef.current) window.clearTimeout(bannerTimeoutRef.current);
+        bannerTimeoutRef.current = window.setTimeout(() => {
+            setEvolutionBanner(null);
+        }, 4600);
+    }, []);
 
-    // Handle Resize
-    useEffect(() => {
-        const resize = () => {
-            if (canvasRef.current) {
-                canvasRef.current.width = window.innerWidth;
-                canvasRef.current.height = window.innerHeight;
-                if (playerRef.current.x === 0) {
-                    playerRef.current.x = window.innerWidth / 2;
-                    playerRef.current.y = window.innerHeight / 2;
+    const syncHudImmediate = useCallback(() => {
+        setStability(stabilityRef.current);
+        setSolarMass(solarMassRef.current);
+        setElementIndex(elementIndexRef.current);
+        setAlphasCaptured(alphasCapturedRef.current);
+        setSpectralShift(spectralShiftRef.current);
+        setShieldTime(shieldTimeRef.current);
+        setVentCooldown(ventCooldownRef.current);
+        setFlareWarning(flareWarningRef.current);
+        setFlareActive(flareActiveRef.current);
+        setNeutronTimeLeft(neutronTimeLeftRef.current);
+    }, []);
+
+    const resetSimulation = useCallback(
+        (targetState: GameState) => {
+            const canvas = canvasRef.current;
+            const cx = (canvas?.width ?? window.innerWidth) / 2;
+            const cy = (canvas?.height ?? window.innerHeight) / 2;
+
+            playerRef.current = { x: cx, y: cy, vx: 0, vy: 0 };
+            targetPosRef.current = { x: cx, y: cy };
+            touchLastRef.current = null;
+            keysPressedRef.current.clear();
+
+            stabilityRef.current = 100;
+            solarMassRef.current = 0.5;
+            peakMassRef.current = 0.5;
+            elementIndexRef.current = 0;
+            alphasCapturedRef.current = 0;
+            totalAlphasRef.current = 0;
+            spectralShiftRef.current = 0;
+            shieldTimeRef.current = 0;
+            ventCooldownRef.current = 0;
+            invulnTimeRef.current = targetState === 'playing' ? 2.0 : 0;
+            flareWarningRef.current = 0;
+            flareActiveRef.current = 0;
+            neutronTimeLeftRef.current = 0;
+            nodeTimerRef.current = 0;
+            runElapsedRef.current = 0;
+
+            particlesRef.current = [];
+            nodesRef.current = [];
+            nextNodeOrderRef.current = 1;
+            trailRef.current = [];
+            shockwavesRef.current = [];
+            burstSparksRef.current = [];
+            floatingTextsRef.current = [];
+            shakeRef.current = 0;
+            hitFlashRef.current = 0;
+
+            if (bannerTimeoutRef.current) window.clearTimeout(bannerTimeoutRef.current);
+            if (hintTimeoutRef.current) window.clearTimeout(hintTimeoutRef.current);
+
+            setEvolutionBanner(null);
+            setDestiny(null);
+            setRunSummary(null);
+            setIsPaused(false);
+            isPausedRef.current = false;
+            setShowHelp(false);
+            setShowCodex(false);
+
+            syncHudImmediate();
+            gameStateRef.current = targetState;
+            setGameState(targetState);
+
+            if (targetState === 'playing') {
+                setShowStartHint(true);
+                hintTimeoutRef.current = window.setTimeout(() => setShowStartHint(false), 5500);
+                playSound(440, 'sine', 0.22, 0.28);
+            } else {
+                setShowStartHint(false);
+            }
+        },
+        [playSound, syncHudImmediate]
+    );
+
+    const triggerVentMass = useCallback(() => {
+        const state = gameStateRef.current;
+        if ((state !== 'playing' && state !== 'neutron') || isPausedRef.current) return;
+        if (ventCooldownRef.current > 0 || solarMassRef.current <= 0.52) return;
+
+        const shed = Math.min(0.06, solarMassRef.current - 0.5);
+        solarMassRef.current = Math.max(0.5, solarMassRef.current - shed);
+        ventCooldownRef.current = 1.6;
+
+        const pX = playerRef.current.x;
+        const pY = playerRef.current.y;
+        spawnShockwave(pX, pY, 220, '#38bdf8', 4);
+        spawnBurst(pX, pY, '#fbbf24', 14);
+        spawnFloatingText(pX, pY - 36, `-${shed.toFixed(2)} M☉ · SOLAR WIND`, '#38bdf8');
+        playSound(240, 'triangle', 0.3, 0.25);
+
+        // Push back & clear Helium particles within blast radius
+        for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+            const p = particlesRef.current[i];
+            const dx = p.x - pX;
+            const dy = p.y - pY;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 220) {
+                if (p.type === 'helium') {
+                    spawnBurst(p.x, p.y, '#f43f5e', 5);
+                    particlesRef.current.splice(i, 1);
+                } else if (dist > 1) {
+                    p.vx += (dx / dist) * 2.5;
+                    p.vy += (dy / dist) * 2.5;
                 }
             }
+        }
+
+        syncHudImmediate();
+    }, [playSound, spawnBurst, spawnFloatingText, spawnShockwave, syncHudImmediate]);
+
+    const openHelpModal = useCallback(() => {
+        wasPausedBeforeModalRef.current = isPausedRef.current;
+        setIsPaused(true);
+        isPausedRef.current = true;
+        setShowHelp(true);
+    }, []);
+
+    const closeHelpModal = useCallback(() => {
+        setShowHelp(false);
+        const shouldStayPaused = wasPausedBeforeModalRef.current;
+        setIsPaused(shouldStayPaused);
+        isPausedRef.current = shouldStayPaused;
+    }, []);
+
+    const openCodexModal = useCallback(() => {
+        wasPausedBeforeModalRef.current = isPausedRef.current;
+        if (gameStateRef.current === 'playing' || gameStateRef.current === 'neutron') {
+            setIsPaused(true);
+            isPausedRef.current = true;
+        }
+        setShowCodex(true);
+    }, []);
+
+    const closeCodexModal = useCallback(() => {
+        setShowCodex(false);
+        if (gameStateRef.current === 'playing' || gameStateRef.current === 'neutron') {
+            const shouldStayPaused = wasPausedBeforeModalRef.current;
+            setIsPaused(shouldStayPaused);
+            isPausedRef.current = shouldStayPaused;
+        }
+    }, []);
+
+    // Keyboard controls & shortcuts
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.code === 'Escape') {
+                if (showHelp) {
+                    closeHelpModal();
+                    return;
+                }
+                if (showCodex) {
+                    closeCodexModal();
+                    return;
+                }
+            }
+
+            if (showHelp || showCodex) return;
+
+            if (e.code === 'Space') {
+                if (gameStateRef.current === 'playing' || gameStateRef.current === 'neutron') {
+                    e.preventDefault();
+                    triggerVentMass();
+                }
+                return;
+            }
+
+            if (e.code === 'KeyP') {
+                if (gameStateRef.current === 'playing' || gameStateRef.current === 'neutron') {
+                    setIsPaused(prev => !prev);
+                }
+                return;
+            }
+
+            if (e.code === 'KeyM') {
+                setIsMuted(prev => !prev);
+                return;
+            }
+
+            if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+                keysPressedRef.current.add(e.code);
+            }
         };
+
+        const onKeyUp = (e: KeyboardEvent) => {
+            keysPressedRef.current.delete(e.code);
+        };
+
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+        return () => {
+            window.removeEventListener('keydown', onKeyDown);
+            window.removeEventListener('keyup', onKeyUp);
+        };
+    }, [closeCodexModal, closeHelpModal, showCodex, showHelp, triggerVentMass]);
+
+    // Canvas resize & starfield initialization
+    useEffect(() => {
+        const initStars = (w: number, h: number) => {
+            bgStarsRef.current = Array.from({ length: 70 }, () => ({
+                x: Math.random() * w,
+                y: Math.random() * h,
+                size: Math.random() * 1.6 + 0.5,
+                depth: Math.random() * 0.6 + 0.15,
+                alpha: Math.random() * 0.45 + 0.15,
+            }));
+        };
+
+        const resize = () => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            if (playerRef.current.x === 0 && playerRef.current.y === 0) {
+                playerRef.current.x = canvas.width / 2;
+                playerRef.current.y = canvas.height / 2;
+                targetPosRef.current.x = canvas.width / 2;
+                targetPosRef.current.y = canvas.height / 2;
+            } else {
+                targetPosRef.current.x = clamp(targetPosRef.current.x, 24, canvas.width - 24);
+                targetPosRef.current.y = clamp(targetPosRef.current.y, 24, canvas.height - 24);
+            }
+            initStars(canvas.width, canvas.height);
+        };
+
         window.addEventListener('resize', resize);
         resize();
         return () => window.removeEventListener('resize', resize);
     }, []);
 
-    // Main Game Loop
+    // Main 60fps-normalized Simulation Loop (never tears down on per-frame state changes)
     useEffect(() => {
-        if ((gameState !== 'playing' && gameState !== 'neutron') || isPaused) return;
-
         const canvas = canvasRef.current;
         const ctx = canvas?.getContext('2d');
         if (!canvas || !ctx) return;
 
-        let lastFrameTime = performance.now();
-        const loop = (time: number) => {
-            const dt = (time - lastFrameTime) / 16; // Normalized to 60fps
-            lastFrameTime = time;
+        let lastTime = performance.now();
+        let lastHudSync = performance.now();
 
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const loop = (now: number) => {
+            const rawDt = (now - lastTime) / 16.6667;
+            const dt = clamp(rawDt, 0.2, 2.5);
+            const dtSec = dt * (1 / 60);
+            lastTime = now;
 
-            // Background aesthetically adapts to difficulty
-            const isSupernovaPath = solarMass >= 1.4;
-            const difficultyBgTint = difficulty === 'Nebula' ? '#0f172a' : (difficulty === 'Quasar' ? '#0a0a0a' : '#1e293b');
-            const bgStart = isSupernovaPath ? '#270c12' : difficultyBgTint;
-            const bgEnd = isSupernovaPath ? '#0f0507' : '#0f172a';
+            const state = gameStateRef.current;
+            const paused = isPausedRef.current;
+            const cfg = DIFFICULTY_CONFIG[difficultyRef.current];
+            const isActivePlay = state === 'playing' || state === 'neutron';
 
-            // Draw Background Gradients
-            const grad = ctx.createRadialGradient(canvas.width/2, canvas.height/2, 0, canvas.width/2, canvas.height/2, canvas.width/2);
+            ctx.save();
+
+            // Screen shake transform
+            if (shakeRef.current > 0.2) {
+                const sx = (Math.random() - 0.5) * shakeRef.current;
+                const sy = (Math.random() - 0.5) * shakeRef.current;
+                ctx.translate(sx, sy);
+                if (!paused) shakeRef.current *= Math.pow(0.86, dt);
+            } else {
+                shakeRef.current = 0;
+            }
+
+            // Background Gradient
+            const isSupernovaPath = solarMassRef.current >= 1.4;
+            const diffTint =
+                difficultyRef.current === 'Nebula'
+                    ? '#0c162b'
+                    : difficultyRef.current === 'Quasar'
+                    ? '#0e0b14'
+                    : '#111b33';
+            const bgStart = isSupernovaPath ? '#260b14' : diffTint;
+            const bgEnd = isSupernovaPath ? '#090307' : '#070d1a';
+
+            const grad = ctx.createRadialGradient(
+                canvas.width / 2,
+                canvas.height / 2,
+                0,
+                canvas.width / 2,
+                canvas.height / 2,
+                Math.max(canvas.width, canvas.height) * 0.72
+            );
             grad.addColorStop(0, bgStart);
             grad.addColorStop(1, bgEnd);
             ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillRect(-20, -20, canvas.width + 40, canvas.height + 40);
 
-            // Momentum Physics Engine
-            const drag = 0.94;
-            const sizeMultiplier = difficulty === 'Nebula' ? 0.8 : (difficulty === 'Quasar' ? 1.15 : 1.0);
-            const massEffect = 1 + ((currentElement.radius * sizeMultiplier) / 100) + (solarMass - 0.5);
-            const spring = 0.05 / massEffect;
-            
-            const ax = (mousePos.x - playerRef.current.x) * spring;
-            const ay = (mousePos.y - playerRef.current.y) * spring;
-            
-            playerRef.current.vx = (playerRef.current.vx + ax) * drag;
-            playerRef.current.vy = (playerRef.current.vy + ay) * drag;
-            playerRef.current.x += playerRef.current.vx;
-            playerRef.current.y += playerRef.current.vy;
-
-            // Draw Trail
-            const pR = currentElement.radius * sizeMultiplier;
-            trailRef.current.push({ x: playerRef.current.x, y: playerRef.current.y, size: pR });
-            if (trailRef.current.length > 15) trailRef.current.shift();
-
-            trailRef.current.forEach((pos, i) => {
-                const ratio = i / trailRef.current.length;
+            // Subtle parallax starfield
+            const pVx = isActivePlay && !paused ? playerRef.current.vx : 0.2;
+            const pVy = isActivePlay && !paused ? playerRef.current.vy : 0.08;
+            bgStarsRef.current.forEach(star => {
+                if (!paused) {
+                    star.x -= pVx * star.depth * 0.25 * dt;
+                    star.y -= pVy * star.depth * 0.25 * dt;
+                    if (star.x < 0) star.x += canvas.width;
+                    if (star.x > canvas.width) star.x -= canvas.width;
+                    if (star.y < 0) star.y += canvas.height;
+                    if (star.y > canvas.height) star.y -= canvas.height;
+                }
+                ctx.fillStyle = `rgba(226, 232, 240, ${star.alpha})`;
                 ctx.beginPath();
-                ctx.arc(pos.x, pos.y, pR * ratio * 0.8, 0, Math.PI * 2);
-                ctx.fillStyle = `${currentElement.color}${Math.floor(ratio * 40).toString(16).padStart(2, '0')}`;
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
                 ctx.fill();
             });
 
-            // Spectral Meter calculation (based on velocity)
-            const speed = Math.sqrt(playerRef.current.vx ** 2 + playerRef.current.vy ** 2);
-            const targetShift = (speed - 5) * 15; // Centered around speed 5
-            setSpectralShift(prev => prev + (Math.max(-100, Math.min(100, targetShift)) - prev) * 0.1);
+            if (isActivePlay && !paused) {
+                runElapsedRef.current += dtSec;
 
-            // Update Shield & Healing & Flares
-            if (shieldTime > 0) {
-                setShieldTime(prev => Math.max(0, prev - 0.016));
+                // Keyboard directional steering
+                const keys = keysPressedRef.current;
+                const keySpeed = 8.5 * dt;
+                if (keys.has('KeyA') || keys.has('ArrowLeft')) targetPosRef.current.x -= keySpeed;
+                if (keys.has('KeyD') || keys.has('ArrowRight')) targetPosRef.current.x += keySpeed;
+                if (keys.has('KeyW') || keys.has('ArrowUp')) targetPosRef.current.y -= keySpeed;
+                if (keys.has('KeyS') || keys.has('ArrowDown')) targetPosRef.current.y += keySpeed;
+                targetPosRef.current.x = clamp(targetPosRef.current.x, 24, canvas.width - 24);
+                targetPosRef.current.y = clamp(targetPosRef.current.y, 24, canvas.height - 24);
+
+                const curEl = ELEMENTS[elementIndexRef.current];
+
+                // Momentum Physics Engine (dt-normalized)
+                const drag = Math.pow(0.935, dt);
+                const massEffect = 1 + (curEl.radius * cfg.sizeMult) / 110 + (solarMassRef.current - 0.5) * 0.75;
+                const spring = (0.052 / massEffect) * dt;
+
+                const ax = (targetPosRef.current.x - playerRef.current.x) * spring;
+                const ay = (targetPosRef.current.y - playerRef.current.y) * spring;
+
+                playerRef.current.vx = (playerRef.current.vx + ax) * drag;
+                playerRef.current.vy = (playerRef.current.vy + ay) * drag;
+                playerRef.current.x = clamp(playerRef.current.x + playerRef.current.vx * dt, 20, canvas.width - 20);
+                playerRef.current.y = clamp(playerRef.current.y + playerRef.current.vy * dt, 20, canvas.height - 20);
+
+                // Velocity-driven Spectral Shift (-100 Blueshift .. +100 Redshift)
+                const speed = Math.hypot(playerRef.current.vx, playerRef.current.vy);
+                const targetShift = clamp((speed - 4.2) * 16, -100, 100);
+                spectralShiftRef.current += (targetShift - spectralShiftRef.current) * (1 - Math.pow(0.9, dt));
+
+                // Timers
+                if (shieldTimeRef.current > 0) {
+                    shieldTimeRef.current = Math.max(0, shieldTimeRef.current - dtSec);
+                }
+                if (ventCooldownRef.current > 0) {
+                    ventCooldownRef.current = Math.max(0, ventCooldownRef.current - dtSec);
+                }
+                if (invulnTimeRef.current > 0) {
+                    invulnTimeRef.current = Math.max(0, invulnTimeRef.current - dtSec);
+                }
+                if (hitFlashRef.current > 0) {
+                    hitFlashRef.current = Math.max(0, hitFlashRef.current - dtSec * 3.5);
+                }
+
+                // Passive stability recovery
+                stabilityRef.current = Math.min(100, stabilityRef.current + cfg.healingPerSec * dtSec);
+
+                // Neutron Pulse Countdown
+                if (state === 'neutron') {
+                    neutronTimeLeftRef.current = Math.max(0, neutronTimeLeftRef.current - dtSec);
+                    if (neutronTimeLeftRef.current <= 0) {
+                        const finalDestiny: 'dwarf' | 'supernova' =
+                            solarMassRef.current >= 1.4 ? 'supernova' : 'dwarf';
+                        setDestiny(finalDestiny);
+                        unlockEndingInCodex(finalDestiny);
+                        setRunSummary({
+                            finalElement: 'Iron',
+                            finalSymbol: 'Fe',
+                            peakMass: peakMassRef.current,
+                            alphasFused: totalAlphasRef.current,
+                            timeSurvivedSec: runElapsedRef.current,
+                            difficulty: difficultyRef.current,
+                        });
+                        gameStateRef.current = 'ascended';
+                        setGameState('ascended');
+                        syncHudImmediate();
+                        playSound(finalDestiny === 'supernova' ? 880 : 660, 'sine', 1.8, 0.42);
+                    }
+                }
+
+                // Solar Flare Sequence
+                if (flareWarningRef.current > 0) {
+                    flareWarningRef.current = Math.max(0, flareWarningRef.current - dtSec);
+                    if (flareWarningRef.current === 0) {
+                        flareActiveRef.current = 6.5; // 6.5s active flare
+                        playSound(190, 'sawtooth', 0.8, 0.24);
+                    }
+                } else if (flareActiveRef.current > 0) {
+                    flareActiveRef.current = Math.max(0, flareActiveRef.current - dtSec);
+                } else if (state === 'playing' && elementIndexRef.current >= 1) {
+                    const flareChancePerSec = 0.028 * cfg.flareRate;
+                    if (Math.random() < flareChancePerSec * dtSec) {
+                        flareWarningRef.current = 3.2; // 3.2s warning
+                        spawnNodes();
+                        playSound(320, 'sine', 0.45, 0.2);
+                    }
+                }
+
+                // Convection Node Expiry
+                if (nodesRef.current.length > 0) {
+                    nodeTimerRef.current = Math.max(0, nodeTimerRef.current - dtSec);
+                    if (nodeTimerRef.current <= 0 && flareWarningRef.current === 0 && flareActiveRef.current === 0) {
+                        nodesRef.current = [];
+                    }
+                }
+
+                // Spawn Particles (area-balanced)
+                const isMobile = canvas.width < 640;
+                const areaScalar = clamp((canvas.width * canvas.height) / (1440 * 900), 0.7, 1.35);
+                const flareMult = flareActiveRef.current > 0 ? 2.2 : 1.0;
+
+                if (state === 'playing') {
+                    const heliumRatePerSec =
+                        (0.65 + elementIndexRef.current * 0.42) * cfg.heliumRate * flareMult * areaScalar;
+                    if (Math.random() < heliumRatePerSec * dtSec) {
+                        particlesRef.current.push(
+                            createParticle(canvas.width, canvas.height, 'helium', elementIndexRef.current, difficultyRef.current, isMobile)
+                        );
+                    }
+
+                    const alphaBoost = spectralShiftRef.current < -20 ? 1.35 : 1.0;
+                    const alphaRatePerSec =
+                        Math.max(0.32, (0.78 - elementIndexRef.current * 0.032) * cfg.alphaRate * alphaBoost);
+                    if (Math.random() < alphaRatePerSec * dtSec) {
+                        particlesRef.current.push(
+                            createParticle(canvas.width, canvas.height, 'alpha', elementIndexRef.current, difficultyRef.current, isMobile)
+                        );
+                    }
+
+                    const shieldRatePerSec = 0.095 * cfg.shieldRate;
+                    if (Math.random() < shieldRatePerSec * dtSec) {
+                        particlesRef.current.push(
+                            createParticle(canvas.width, canvas.height, 'shield', elementIndexRef.current, difficultyRef.current, isMobile)
+                        );
+                    }
+                }
+
+                const isotopeRatePerSec = state === 'neutron' ? 7.5 : 0.34 * cfg.isotopeRate;
+                if (Math.random() < isotopeRatePerSec * dtSec) {
+                    particlesRef.current.push(
+                        createParticle(
+                            canvas.width,
+                            canvas.height,
+                            'isotope',
+                            state === 'neutron' ? ELEMENTS.length - 1 : elementIndexRef.current,
+                            difficultyRef.current,
+                            isMobile
+                        )
+                    );
+                }
             }
 
-            // Auto-healing logic
-            const healingRate = difficulty === 'Nebula' ? 0.04 : (difficulty === 'Stellar' ? 0.02 : 0.005);
-            setStability(prev => Math.min(100, prev + healingRate));
-
-            // Solar Flare Logic
-            if (flareWarning > 0) {
-                setFlareWarning(prev => prev - 1);
-                if (flareWarning === 1) {
-                    setFlareActive(400); // Activate for 400 frames
-                    playSound(200, 'sawtooth', 1, 0.3);
-                }
-            } else if (flareActive > 0) {
-                setFlareActive(prev => prev - 1);
-            } else {
-                const flareChance = difficulty === 'Nebula' ? 0.0001 : (difficulty === 'Stellar' ? 0.0003 : 0.0008);
-                if (Math.random() < flareChance) {
-                    setFlareWarning(200); // 200 frame warning
-                    spawnNodes(); // Defensive sequence spawn
-                    playSound(300, 'sine', 0.5, 0.2);
-                }
-            }
-
-            // Draw Convection Nodes
+            // --- RENDERING & COLLISIONS ---
+            const curEl = ELEMENTS[elementIndexRef.current];
             const pX = playerRef.current.x;
             const pY = playerRef.current.y;
-            // pR is already declared above for the trail
+            const pR = curEl.radius * cfg.sizeMult;
 
-            nodes.forEach(node => {
-                if (node.reached) return;
-                ctx.save();
-                ctx.lineWidth = 2;
-                ctx.setLineDash([5, 5]);
-                ctx.strokeStyle = node.order === nextNodeOrder ? ALPHA_BLUE : 'rgba(255,255,255,0.2)';
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, 20, 0, Math.PI * 2);
-                ctx.stroke();
-                
-                // Glow
-                ctx.shadowBlur = 10;
-                ctx.shadowColor = ALPHA_BLUE;
-                ctx.fillStyle = node.order === nextNodeOrder ? ALPHA_BLUE : 'rgba(255,255,255,0.1)';
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, 5, 0, Math.PI * 2);
-                ctx.fill();
-                
-                // Order Number
-                ctx.font = '10px monospace';
-                ctx.fillStyle = 'white';
-                ctx.fillText(node.order.toString(), node.x, node.y - 15);
-                ctx.restore();
+            if (isActivePlay) {
+                // Trail
+                if (!paused) {
+                    trailRef.current.push({ x: pX, y: pY, size: pR });
+                    if (trailRef.current.length > 14) trailRef.current.shift();
+                }
+                trailRef.current.forEach((pos, i) => {
+                    const ratio = (i + 1) / trailRef.current.length;
+                    ctx.beginPath();
+                    ctx.arc(pos.x, pos.y, pR * ratio * 0.72, 0, Math.PI * 2);
+                    ctx.fillStyle = `${curEl.color}${Math.floor(ratio * 34)
+                        .toString(16)
+                        .padStart(2, '0')}`;
+                    ctx.fill();
+                });
 
-                // Collision with node
-                const dNode = Math.sqrt((pX - node.x)**2 + (pY - node.y)**2);
-                if (dNode < pR + 20 && node.order === nextNodeOrder) {
-                    node.reached = true;
-                    setNextNodeOrder(prev => prev + 1);
-                    playSound(600 + node.order * 100, 'sine', 0.1, 0.2);
-                    
-                    if (node.order === 3) {
-                        setShieldTime(8); // 8 second shield (matches powerup)
-                        playSound(1000, 'square', 0.5, 0.4);
-                        setNodes([]);
+                // Convection Nodes Guiding Tether (1 -> 2 -> 3)
+                const unreached = nodesRef.current.filter(n => !n.reached);
+                if (unreached.length > 1) {
+                    ctx.save();
+                    ctx.setLineDash([6, 8]);
+                    ctx.strokeStyle = 'rgba(56, 189, 248, 0.25)';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    unreached.forEach((n, idx) => {
+                        if (idx === 0) ctx.moveTo(n.x, n.y);
+                        else ctx.lineTo(n.x, n.y);
+                    });
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
+                // Draw Convection Nodes & Check Sequence
+                nodesRef.current.forEach(node => {
+                    if (node.reached) return;
+                    const isTarget = node.order === nextNodeOrderRef.current;
+
+                    ctx.save();
+                    ctx.lineWidth = isTarget ? 2.5 : 1.5;
+                    ctx.setLineDash([5, 5]);
+                    ctx.strokeStyle = isTarget ? '#38bdf8' : 'rgba(255,255,255,0.22)';
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, isTarget ? 23 : 18, 0, Math.PI * 2);
+                    ctx.stroke();
+
+                    if (isTarget) {
+                        ctx.shadowBlur = 14;
+                        ctx.shadowColor = '#38bdf8';
                     }
-                }
-            });
+                    ctx.fillStyle = isTarget ? '#38bdf8' : 'rgba(255,255,255,0.16)';
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, 6, 0, Math.PI * 2);
+                    ctx.fill();
 
-            // Node Spawning Interval (Now linked to Solar Flares primarily)
-            // We keep a fallback long-timer for practice
-            const spawnInterval = gameState === 'neutron' ? 5000 : 60000;
-            if (Date.now() - lastNodeSpawnRef.current > spawnInterval && flareWarning === 0 && flareActive === 0) {
-                spawnNodes();
-            }
+                    ctx.setLineDash([]);
+                    ctx.font = '700 12px "JetBrains Mono", monospace';
+                    ctx.fillStyle = isTarget ? '#e0f2fe' : '#94a3b8';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(node.order.toString(), node.x, node.y - 28);
+                    ctx.restore();
 
-            // Draw Player Neumorphic Pulse
-            // Shield visual
-            if (shieldTime > 0) {
-                ctx.save();
-                ctx.strokeStyle = '#38bdf8';
-                ctx.lineWidth = 3;
-                ctx.shadowBlur = 15;
-                ctx.shadowColor = '#38bdf8';
-                ctx.beginPath();
-                ctx.arc(pX, pY, pR + 10, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.restore();
-            }
+                    if (!paused && isTarget) {
+                        const dNode = Math.hypot(pX - node.x, pY - node.y);
+                        if (dNode < pR + 22) {
+                            node.reached = true;
+                            nextNodeOrderRef.current += 1;
+                            spawnShockwave(node.x, node.y, 55, '#38bdf8', 2);
+                            playSound(560 + node.order * 110, 'sine', 0.12, 0.22);
 
-            ctx.save();
-            ctx.shadowBlur = 20;
-            ctx.shadowColor = currentElement.color;
-            ctx.beginPath();
-            ctx.arc(pX, pY, pR, 0, Math.PI * 2);
-            ctx.fillStyle = currentElement.color;
-            ctx.fill();
-            ctx.restore();
-
-            // Spectral tinting on nucleus
-            ctx.save();
-            ctx.globalCompositeOperation = 'overlay';
-            const spectralColor = spectralShift > 0 ? `rgba(255,0,0,${spectralShift/200})` : `rgba(0,0,255,${Math.abs(spectralShift)/200})`;
-            ctx.fillStyle = spectralColor;
-            ctx.beginPath();
-            ctx.arc(pX, pY, pR, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-
-            // Neumorphic Inner Glow effect
-            const innerGrad = ctx.createRadialGradient(pX - pR/3, pY - pR/3, pR/10, pX, pY, pR);
-            innerGrad.addColorStop(0, 'rgba(255,255,255,0.4)');
-            innerGrad.addColorStop(1, 'transparent');
-            ctx.fillStyle = innerGrad;
-            ctx.beginPath();
-            ctx.arc(pX, pY, pR, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Label
-            ctx.fillStyle = MIDNIGHT_NAVY;
-            ctx.font = 'bold 16px font-sans';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(currentElement.symbol, pX, pY);
-
-            // Helium Spawn
-            const areaScalar = (canvas.width * canvas.height) / (1920 * 1080);
-            const difficultyScalar = difficulty === 'Nebula' ? 0.4 : (difficulty === 'Quasar' ? 1.6 : 1.0);
-            const flareMultiplier = flareActive > 0 ? 2.5 : 1.0;
-            const heliumChance = (0.008 + (elementIndex * 0.012)) * difficultyScalar * flareMultiplier * Math.max(0.5, areaScalar);
-            if (gameState === 'playing' && Math.random() < heliumChance) {
-                particlesRef.current.push(new Particle(canvas, 'helium', elementIndex, difficulty));
-            }
-
-            // Alpha Spawn
-            const alphaScalar = difficulty === 'Nebula' ? 1.6 : (difficulty === 'Quasar' ? 0.7 : 1.0);
-            const baseAlphaChance = (0.012 - (elementIndex * 0.0008)) * alphaScalar;
-            const alphaChance = Math.abs(spectralShift) < 20 ? Math.max(0.004, baseAlphaChance) : 0.002;
-            if (gameState === 'playing' && Math.random() < alphaChance) {
-                particlesRef.current.push(new Particle(canvas, 'alpha', elementIndex, difficulty));
-            }
-
-            // Isotope & Shield Powerup Spawn
-            const powerupChance = difficulty === 'Nebula' ? 0.012 : (difficulty === 'Quasar' ? 0.003 : 0.005);
-            const shieldPowerupChance = difficulty === 'Nebula' ? 0.004 : (difficulty === 'Quasar' ? 0.0008 : 0.0015);
-            
-            if ((gameState === 'playing' || gameState === 'neutron') && Math.random() < (gameState === 'neutron' ? 0.15 : powerupChance)) {
-                particlesRef.current.push(new Particle(canvas, 'isotope', gameState === 'neutron' ? ELEMENTS.length - 1 : elementIndex, difficulty));
-            }
-            if (gameState === 'playing' && Math.random() < shieldPowerupChance) {
-                particlesRef.current.push(new Particle(canvas, 'shield', elementIndex, difficulty));
-            }
-
-            // Update & Draw Particles
-            for (let i = particlesRef.current.length - 1; i >= 0; i--) {
-                const p = particlesRef.current[i];
-                if (!p) continue;
-                
-                // Neutron Mode Velocity Boost
-                if (gameState === 'neutron') {
-                    p.vx *= 1.001; 
-                    p.vy *= 1.001;
-                }
-                if (p.type === 'helium' && solarMass > 1.0) {
-                    const dx = pX - p.x;
-                    const dy = pY - p.y;
-                    const distSq = dx*dx + dy*dy;
-                    const pullStrength = (solarMass - 1.0) * 15;
-                    if (distSq < 160000) { // Within 400px
-                        const force = pullStrength / Math.max(200, Math.sqrt(distSq));
-                        p.vx += (dx / Math.sqrt(distSq)) * force * 0.05;
-                        p.vy += (dy / Math.sqrt(distSq)) * force * 0.05;
-                    }
-                }
-
-                // Particle-Particle Separation (Prevent Overlap)
-                for (let j = i - 1; j >= 0; j--) {
-                    const other = particlesRef.current[j];
-                    if (!other) continue;
-                    const dx = p.x - other.x;
-                    const dy = p.y - other.y;
-                    const minDist = p.radius + other.radius + 5;
-                    const distSq = dx*dx + dy*dy;
-                    if (distSq < minDist*minDist) {
-                        const dist = Math.sqrt(distSq) || 1;
-                        const force = (minDist - dist) / dist * 0.5;
-                        p.vx += dx * force;
-                        p.vy += dy * force;
-                        other.vx -= dx * force;
-                        other.vy -= dy * force;
-                    }
-                }
-
-                // Magnetic Attraction for Alpha if centered
-                if (p.type === 'alpha' && Math.abs(spectralShift) < 20) {
-                    const dx = pX - p.x;
-                    const dy = pY - p.y;
-                    const dist = Math.sqrt(dx*dx + dy*dy);
-                    if (dist < 400) {
-                        p.vx += (dx / dist) * 0.2;
-                        p.vy += (dy / dist) * 0.2;
-                    }
-                }
-
-                p.update();
-                p.draw(ctx);
-
-                // Collision Detection
-                const dx = p.x - pX;
-                const dy = p.y - pY;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-
-                if (dist < pR + p.radius) {
-                    particlesRef.current.splice(i, 1);
-                    if (p.type === 'helium') {
-                        if (shieldTime > 0) {
-                            playSound(300, 'sine', 0.05, 0.1);
-                        } else {
-                            setStability(prev => {
-                                const next = prev - (5 + elementIndex * 1.0);
-                                if (next <= 0) {
-                                    setGameState('collapsed');
-                                    playSound(100, 'sawtooth', 1, 0.5);
-                                    return 0;
-                                }
-                                playSound(150, 'sine', 0.1, 0.2);
-                                return next;
-                            });
+                            if (node.order === 3) {
+                                shieldTimeRef.current = 8;
+                                nodesRef.current = [];
+                                spawnShockwave(pX, pY, 120, '#22d3ee', 3);
+                                spawnFloatingText(pX, pY - pR - 14, 'MAGNETIC SHIELD · 8s', '#22d3ee');
+                                playSound(960, 'triangle', 0.38, 0.32);
+                            }
                         }
+                    }
+                });
+
+                // Spectral Time-Dilation & Mass Modifiers
+                const shift = spectralShiftRef.current;
+                const heliumTimeScale = shift < -20 ? 0.65 : shift > 20 ? 1.25 : 1.0;
+                const isotopeMassMult = shift > 20 ? 1.5 : 1.0;
+                const alphaPullRange = shift < -20 ? 380 : Math.abs(shift) <= 20 ? 220 : 0;
+
+                // Update & Draw Particles
+                for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+                    const p = particlesRef.current[i];
+                    if (!p) continue;
+
+                    if (!paused) {
+                        p.pulsePhase += 0.08 * dt;
+
+                        if (state === 'neutron') {
+                            const boost = Math.pow(1.001, dt);
+                            p.vx *= boost;
+                            p.vy *= boost;
+                        }
+
+                        // Gravitational pull on Helium at high mass (> 1.0 M☉)
+                        if (p.type === 'helium' && solarMassRef.current > 1.0) {
+                            const dx = pX - p.x;
+                            const dy = pY - p.y;
+                            const dist = Math.hypot(dx, dy);
+                            if (dist > 1 && dist < 380) {
+                                const pullStrength = (solarMassRef.current - 1.0) * 14;
+                                const force = (pullStrength / Math.max(180, dist)) * 0.045 * dt;
+                                p.vx += (dx / dist) * force;
+                                p.vy += (dy / dist) * force;
+                            }
+                        }
+
+                        // Magnetic Alpha Pull (strongest in Blueshift)
+                        if (p.type === 'alpha' && alphaPullRange > 0) {
+                            const dx = pX - p.x;
+                            const dy = pY - p.y;
+                            const dist = Math.hypot(dx, dy);
+                            if (dist > 1 && dist < alphaPullRange) {
+                                const pullStrength = shift < -20 ? 0.24 : 0.1;
+                                p.vx += (dx / dist) * pullStrength * dt;
+                                p.vy += (dy / dist) * pullStrength * dt;
+                            }
+                        }
+
+                        // Soft separation to reduce clumping
+                        for (let j = i - 1; j >= 0; j--) {
+                            const other = particlesRef.current[j];
+                            if (!other) continue;
+                            const dx = p.x - other.x;
+                            const dy = p.y - other.y;
+                            const minDist = p.radius + other.radius + 4;
+                            const distSq = dx * dx + dy * dy;
+                            if (distSq > 0 && distSq < minDist * minDist) {
+                                const dist = Math.sqrt(distSq);
+                                const force = ((minDist - dist) / dist) * 0.12 * dt;
+                                p.vx += dx * force;
+                                p.vy += dy * force;
+                                other.vx -= dx * force;
+                                other.vy -= dy * force;
+                            }
+                        }
+
+                        const moveScale = p.type === 'helium' ? dt * heliumTimeScale : dt;
+                        p.x += p.vx * moveScale;
+                        p.y += p.vy * moveScale;
+                    }
+
+                    // Draw Distinct Particle Silhouettes
+                    ctx.save();
+                    if (p.glow > 0) {
+                        ctx.shadowBlur = p.glow;
+                        ctx.shadowColor = p.color;
+                    }
+
+                    if (p.type === 'helium') {
+                        // Sharp directional crimson diamond/dart
+                        const angle = Math.atan2(p.vy, p.vx);
+                        ctx.translate(p.x, p.y);
+                        ctx.rotate(angle);
+                        ctx.beginPath();
+                        ctx.moveTo(p.radius * 1.45, 0);
+                        ctx.lineTo(-p.radius * 0.7, p.radius * 0.78);
+                        ctx.lineTo(-p.radius * 0.35, 0);
+                        ctx.lineTo(-p.radius * 0.7, -p.radius * 0.78);
+                        ctx.closePath();
+                        ctx.fillStyle = p.color;
+                        ctx.fill();
                     } else if (p.type === 'isotope') {
-                        // Heavy isotope adds mass based on its position in hierarchy - Progressive Mass Gain
-                        const elIdx = ELEMENTS.findIndex(e => e.symbol === p.label);
-                        const massGain = 0.003 + (Math.pow(elIdx, 1.6) * 0.0008);
-                        setSolarMass(prev => Math.min(2.0, prev + massGain));
-                        playSound(800, 'sine', 0.1, 0.2);
-                        setStability(prev => Math.min(100, prev + 5)); 
+                        // Faceted hexagon for mass isotopes
+                        drawPolygon(ctx, p.x, p.y, p.radius, 6, p.pulsePhase * 0.2);
+                        ctx.fillStyle = p.color;
+                        ctx.fill();
+                        ctx.lineWidth = 1.5;
+                        ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+                        ctx.stroke();
+
+                        ctx.shadowBlur = 0;
+                        ctx.fillStyle = '#070d1a';
+                        ctx.font = '700 10px "JetBrains Mono", monospace';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(p.label, p.x, p.y + 0.5);
                     } else if (p.type === 'shield') {
-                        // Magnetic Shield Powerup
-                        setShieldTime(8);
-                        playSound(1200, 'sine', 0.3, 0.4);
-                        setStability(prev => Math.min(100, prev + 10));
+                        const pulse = 1 + Math.sin(p.pulsePhase) * 0.1;
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.radius * pulse, 0, Math.PI * 2);
+                        ctx.fillStyle = p.color;
+                        ctx.fill();
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.radius * 1.35, 0, Math.PI * 2);
+                        ctx.strokeStyle = 'rgba(34, 211, 238, 0.55)';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+
+                        ctx.shadowBlur = 0;
+                        ctx.fillStyle = '#070d1a';
+                        ctx.font = '700 12px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(p.label, p.x, p.y + 0.5);
                     } else {
-                        // Gathered Alpha
-                        playSound(440, 'triangle', 0.2, 0.3);
-                        if (gameState === 'neutron') {
-                            setStability(prev => Math.min(100, prev + 2));
-                        } else {
-                            setAlphasCaptured(prev => {
-                                const next = prev + 1;
-                                const required = 4; // Require 4 alphas to evolve
-                                 if (next >= required) {
-                                    const isFinalEvolution = elementIndex >= ELEMENTS.length - 1;
-                                    
-                                    if (isFinalEvolution) {
-                                        // Skip the long 'evolving' state for the final transition to Neutron Pulse
-                                        setGameState('neutron');
-                                        setStability(100);
-                                        setAlphasCaptured(0);
-                                        setNeutronTimeLeft(20);
-                                        setNodes([]);
-                                        
-                                        // Spawn intensive field of mass particles immediately
-                                        const newParticles: Particle[] = [];
-                                        for(let k=0; k<100; k++) {
-                                            const np = new Particle(canvas, 'isotope', ELEMENTS.length-1, difficulty);
-                                            np.x = Math.random() * canvas.width;
-                                            np.y = Math.random() * canvas.height;
-                                            np.vx = (Math.random() - 0.5) * 2;
-                                            np.vy = (Math.random() - 0.5) * 2;
-                                            newParticles.push(np);
-                                        }
-                                        particlesRef.current = newParticles;
-                                        playSound(1200, 'square', 0.5, 0.4);
-                                        return 0;
+                        // Alpha orb with gentle pulse
+                        const pulse = 1 + Math.sin(p.pulsePhase) * 0.12;
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.radius * pulse, 0, Math.PI * 2);
+                        ctx.fillStyle = p.color;
+                        ctx.fill();
+
+                        ctx.shadowBlur = 0;
+                        ctx.fillStyle = '#070d1a';
+                        ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(p.label, p.x, p.y + 0.5);
+                    }
+                    ctx.restore();
+
+                    // Collision Detection
+                    if (!paused) {
+                        const dx = p.x - pX;
+                        const dy = p.y - pY;
+                        const dist = Math.hypot(dx, dy);
+
+                        if (dist < pR + p.radius) {
+                            particlesRef.current.splice(i, 1);
+
+                            if (p.type === 'helium') {
+                                if (shieldTimeRef.current > 0 || invulnTimeRef.current > 0) {
+                                    spawnBurst(p.x, p.y, '#38bdf8', 6);
+                                    playSound(310, 'sine', 0.06, 0.08);
+                                } else {
+                                    const dmg = 6 + elementIndexRef.current * 0.9;
+                                    stabilityRef.current = Math.max(0, stabilityRef.current - dmg);
+                                    shakeRef.current = 11;
+                                    hitFlashRef.current = 1.0;
+
+                                    // Knockback away from helium hit
+                                    if (dist > 0.1) {
+                                        playerRef.current.vx -= (dx / dist) * 3.5;
+                                        playerRef.current.vy -= (dy / dist) * 3.5;
                                     }
 
-                                    setGameState('evolving');
-                                    particlesRef.current = [];
-                                    setNodes([]);
-                                    setStability(100); 
-                                    // Progressive evolution mass bump - Tuned for difficulty
-                                    setSolarMass(prevMass => prevMass + (0.001 * Math.pow(1.1, elementIndex))); 
-                                    setTimeout(() => {
-                                        setElementIndex(pIdx => {
-                                            const nIdx = pIdx + 1;
-                                            if (nIdx >= ELEMENTS.length) {
-                                                // This block is now handled by the immediate transition above, 
-                                                // but keeping safety for the callback
-                                                return pIdx;
-                                            }
-                                            setGameState('playing');
-                                            return nIdx;
+                                    spawnBurst(p.x, p.y, '#f43f5e', 10);
+                                    spawnFloatingText(pX, pY - pR - 12, `-${Math.round(dmg)}%`, '#fb7185');
+
+                                    if (stabilityRef.current <= 0) {
+                                        setRunSummary({
+                                            finalElement: curEl.name,
+                                            finalSymbol: curEl.symbol,
+                                            peakMass: peakMassRef.current,
+                                            alphasFused: totalAlphasRef.current,
+                                            timeSurvivedSec: runElapsedRef.current,
+                                            difficulty: difficultyRef.current,
                                         });
-                                    }, 6000); 
-                                    return 0;
+                                        gameStateRef.current = 'collapsed';
+                                        setGameState('collapsed');
+                                        syncHudImmediate();
+                                        playSound(105, 'sawtooth', 0.9, 0.4);
+                                    } else {
+                                        playSound(150, 'sine', 0.12, 0.22);
+                                    }
                                 }
-                                return next;
-                            });
+                            } else if (p.type === 'isotope') {
+                                const baseMassGain = 0.004 + Math.pow(p.elementIdx, 1.55) * 0.0011;
+                                const massGain = baseMassGain * isotopeMassMult;
+                                solarMassRef.current = Math.min(2.0, solarMassRef.current + massGain);
+                                peakMassRef.current = Math.max(peakMassRef.current, solarMassRef.current);
+                                stabilityRef.current = Math.min(100, stabilityRef.current + 4);
+
+                                spawnBurst(p.x, p.y, p.color, 9);
+                                spawnFloatingText(
+                                    pX,
+                                    pY - pR - 10,
+                                    `+${massGain.toFixed(2)} M☉${isotopeMassMult > 1 ? ' (1.5×)' : ''}`,
+                                    p.color
+                                );
+                                playSound(780, 'sine', 0.1, 0.18);
+                            } else if (p.type === 'shield') {
+                                shieldTimeRef.current = 8;
+                                stabilityRef.current = Math.min(100, stabilityRef.current + 10);
+                                spawnShockwave(pX, pY, 100, '#22d3ee', 3);
+                                spawnFloatingText(pX, pY - pR - 14, 'SHIELD 8s · +10%', '#22d3ee');
+                                playSound(1150, 'sine', 0.28, 0.3);
+                            } else {
+                                // Alpha Captured
+                                totalAlphasRef.current += 1;
+                                spawnBurst(p.x, p.y, '#38bdf8', 10);
+                                playSound(440 + alphasCapturedRef.current * 65, 'triangle', 0.18, 0.24);
+
+                                if (state === 'neutron') {
+                                    stabilityRef.current = Math.min(100, stabilityRef.current + 4);
+                                    spawnFloatingText(pX, pY - pR - 10, '+4% STABILITY', '#38bdf8');
+                                } else {
+                                    const nextAlphas = alphasCapturedRef.current + 1;
+                                    const req = curEl.alphasRequired;
+
+                                    if (nextAlphas >= req) {
+                                        const isFinalEvolution = elementIndexRef.current >= ELEMENTS.length - 1;
+                                        alphasCapturedRef.current = 0;
+
+                                        if (isFinalEvolution) {
+                                            // Enter Neutron Pulse Final Sprint
+                                            gameStateRef.current = 'neutron';
+                                            setGameState('neutron');
+                                            stabilityRef.current = 100;
+                                            invulnTimeRef.current = 1.5;
+                                            neutronTimeLeftRef.current = 20;
+                                            nodesRef.current = [];
+                                            flareWarningRef.current = 0;
+                                            flareActiveRef.current = 0;
+
+                                            // Clear Helium and flood Isotopes for final push
+                                            const burstIsotopes: SimParticle[] = [];
+                                            for (let k = 0; k < 75; k++) {
+                                                const np = createParticle(
+                                                    canvas.width,
+                                                    canvas.height,
+                                                    'isotope',
+                                                    ELEMENTS.length - 1,
+                                                    difficultyRef.current,
+                                                    canvas.width < 640
+                                                );
+                                                np.x = Math.random() * canvas.width;
+                                                np.y = Math.random() * canvas.height;
+                                                np.vx = (Math.random() - 0.5) * 1.8;
+                                                np.vy = (Math.random() - 0.5) * 1.8;
+                                                burstIsotopes.push(np);
+                                            }
+                                            particlesRef.current = burstIsotopes;
+                                            spawnShockwave(pX, pY, 320, '#fbbf24', 5);
+                                            playSound(1040, 'square', 0.45, 0.3);
+                                            syncHudImmediate();
+                                        } else {
+                                            // Smooth non-blocking evolution with shockwave + grace window
+                                            const nextIdx = elementIndexRef.current + 1;
+                                            const nextEl = ELEMENTS[nextIdx];
+                                            elementIndexRef.current = nextIdx;
+                                            stabilityRef.current = Math.min(100, stabilityRef.current + 20);
+                                            invulnTimeRef.current = 2.0;
+                                            solarMassRef.current = Math.min(
+                                                2.0,
+                                                solarMassRef.current + 0.008 * Math.pow(1.08, nextIdx)
+                                            );
+                                            peakMassRef.current = Math.max(peakMassRef.current, solarMassRef.current);
+
+                                            // Clear nearby Helium hazards on fusion shockwave
+                                            for (let k = particlesRef.current.length - 1; k >= 0; k--) {
+                                                const other = particlesRef.current[k];
+                                                if (
+                                                    other.type === 'helium' &&
+                                                    Math.hypot(other.x - pX, other.y - pY) < 280
+                                                ) {
+                                                    spawnBurst(other.x, other.y, '#f43f5e', 4);
+                                                    particlesRef.current.splice(k, 1);
+                                                }
+                                            }
+
+                                            spawnShockwave(pX, pY, 260, nextEl.color, 4);
+                                            spawnFloatingText(pX, pY - pR - 16, `FUSED → ${nextEl.name.toUpperCase()}`, nextEl.color);
+                                            unlockElementInCodex(nextEl.symbol);
+                                            showEvolutionOverlay(nextEl);
+                                            playSound(660, 'sine', 0.35, 0.28);
+                                            syncHudImmediate();
+                                        }
+                                    } else {
+                                        alphasCapturedRef.current = nextAlphas;
+                                        spawnFloatingText(pX, pY - pR - 10, `${nextAlphas}/${req} α`, '#38bdf8');
+                                    }
+                                }
+                            }
+                            continue;
                         }
                     }
-                    continue;
+
+                    if (
+                        p.x < -120 ||
+                        p.x > canvas.width + 120 ||
+                        p.y < -120 ||
+                        p.y > canvas.height + 120
+                    ) {
+                        particlesRef.current.splice(i, 1);
+                    }
                 }
 
-                // Remove out of bounds
-                if (p.x < -100 || p.x > canvas.width + 100 || p.y < -100 || p.y > canvas.height + 100) {
-                    particlesRef.current.splice(i, 1);
+                // Draw Shockwaves
+                for (let i = shockwavesRef.current.length - 1; i >= 0; i--) {
+                    const sw = shockwavesRef.current[i];
+                    if (!paused) {
+                        sw.radius += (sw.maxRadius - sw.radius) * 0.14 * dt;
+                        sw.alpha -= 0.028 * dt;
+                    }
+                    if (sw.alpha <= 0) {
+                        shockwavesRef.current.splice(i, 1);
+                        continue;
+                    }
+                    ctx.save();
+                    ctx.globalAlpha = Math.max(0, sw.alpha);
+                    ctx.strokeStyle = sw.color;
+                    ctx.lineWidth = sw.lineWidth;
+                    ctx.beginPath();
+                    ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
                 }
+
+                // Draw Burst Sparks
+                for (let i = burstSparksRef.current.length - 1; i >= 0; i--) {
+                    const sp = burstSparksRef.current[i];
+                    if (!paused) {
+                        sp.x += sp.vx * dt;
+                        sp.y += sp.vy * dt;
+                        sp.vx *= Math.pow(0.94, dt);
+                        sp.vy *= Math.pow(0.94, dt);
+                        sp.life -= dtSec;
+                    }
+                    if (sp.life <= 0) {
+                        burstSparksRef.current.splice(i, 1);
+                        continue;
+                    }
+                    ctx.save();
+                    ctx.globalAlpha = clamp(sp.life / sp.maxLife, 0, 1);
+                    ctx.fillStyle = sp.color;
+                    ctx.beginPath();
+                    ctx.arc(sp.x, sp.y, sp.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                // Draw Player Nucleus
+                // On-core Alpha progress arc (keeps eyes on the star!)
+                if (state === 'playing') {
+                    const req = curEl.alphasRequired;
+                    const gap = 0.14;
+                    const segAngle = (Math.PI * 2 - gap * req) / req;
+                    for (let s = 0; s < req; s++) {
+                        const startA = -Math.PI / 2 + s * (segAngle + gap);
+                        const endA = startA + segAngle;
+                        ctx.save();
+                        ctx.strokeStyle = s < alphasCapturedRef.current ? '#38bdf8' : 'rgba(255,255,255,0.14)';
+                        ctx.lineWidth = 3;
+                        ctx.lineCap = 'round';
+                        ctx.beginPath();
+                        ctx.arc(pX, pY, pR + 7, startA, endA);
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+                }
+
+                // Shield Aura
+                if (shieldTimeRef.current > 0) {
+                    ctx.save();
+                    ctx.strokeStyle = '#22d3ee';
+                    ctx.lineWidth = 3;
+                    ctx.shadowBlur = 16;
+                    ctx.shadowColor = '#22d3ee';
+                    ctx.beginPath();
+                    ctx.arc(pX, pY, pR + 14, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                } else if (invulnTimeRef.current > 0) {
+                    // Grace invulnerability ring
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+                    ctx.setLineDash([4, 4]);
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(pX, pY, pR + 13, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
+                // Core Body
+                ctx.save();
+                ctx.shadowBlur = 24;
+                ctx.shadowColor = hitFlashRef.current > 0.1 ? '#f43f5e' : curEl.color;
+                ctx.beginPath();
+                ctx.arc(pX, pY, pR, 0, Math.PI * 2);
+                ctx.fillStyle = curEl.color;
+                ctx.fill();
+                ctx.restore();
+
+                // Spectral tint on core
+                const shiftVal = spectralShiftRef.current;
+                if (Math.abs(shiftVal) > 15) {
+                    ctx.save();
+                    ctx.fillStyle =
+                        shiftVal > 0
+                            ? `rgba(244, 63, 94, ${Math.min(0.32, shiftVal / 260)})`
+                            : `rgba(56, 189, 248, ${Math.min(0.32, Math.abs(shiftVal) / 260)})`;
+                    ctx.beginPath();
+                    ctx.arc(pX, pY, pR, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                // Hit flash overlay on core
+                if (hitFlashRef.current > 0.05) {
+                    ctx.save();
+                    ctx.fillStyle = `rgba(244, 63, 94, ${hitFlashRef.current * 0.7})`;
+                    ctx.beginPath();
+                    ctx.arc(pX, pY, pR, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                // Inner specular highlight
+                const innerGrad = ctx.createRadialGradient(pX - pR / 3, pY - pR / 3, pR / 10, pX, pY, pR);
+                innerGrad.addColorStop(0, 'rgba(255,255,255,0.45)');
+                innerGrad.addColorStop(1, 'transparent');
+                ctx.fillStyle = innerGrad;
+                ctx.beginPath();
+                ctx.arc(pX, pY, pR, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Element Symbol
+                ctx.fillStyle = '#070d1a';
+                ctx.font = '700 16px "Plus Jakarta Sans", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(curEl.symbol, pX, pY + 0.5);
+
+                // Floating Combat/Capture Texts
+                for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
+                    const ft = floatingTextsRef.current[i];
+                    if (!paused) {
+                        ft.y += ft.vy * dt;
+                        ft.life -= dtSec;
+                    }
+                    if (ft.life <= 0) {
+                        floatingTextsRef.current.splice(i, 1);
+                        continue;
+                    }
+                    ctx.save();
+                    ctx.globalAlpha = clamp(ft.life / ft.maxLife, 0, 1);
+                    ctx.font = '700 12px "JetBrains Mono", monospace';
+                    ctx.fillStyle = ft.color;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(ft.text, ft.x, ft.y);
+                    ctx.restore();
+                }
+            }
+
+            ctx.restore();
+
+            // Sync HUD React State at ~15fps so UI stays smooth without re-render churn
+            if (isActivePlay && !paused && now - lastHudSync > 66) {
+                lastHudSync = now;
+                syncHudImmediate();
             }
 
             frameRef.current = requestAnimationFrame(loop);
@@ -628,228 +1469,348 @@ export default function App() {
 
         frameRef.current = requestAnimationFrame(loop);
         return () => cancelAnimationFrame(frameRef.current);
-    }, [gameState, mousePos, elementIndex, currentElement, playSound, nodes, nextNodeOrder, shieldTime, spectralShift, spawnNodes, solarMass, difficulty, flareActive, flareWarning, isPaused]);
+    }, [playSound, showEvolutionOverlay, spawnBurst, spawnFloatingText, spawnNodes, spawnShockwave, syncHudImmediate, unlockElementInCodex, unlockEndingInCodex]);
 
-    const setStageAscended = () => {
-        setGameState('ascended');
-        playSound(880, 'sine', 2, 0.5);
+    // Pointer Handlers (Mouse + Relative Touch Drag)
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if ((gameStateRef.current !== 'playing' && gameStateRef.current !== 'neutron') || isPausedRef.current) return;
+        targetPosRef.current = {
+            x: clamp(e.clientX, 24, window.innerWidth - 24),
+            y: clamp(e.clientY, 24, window.innerHeight - 24),
+        };
     };
 
-    const handleMouseMove = (e: React.MouseEvent | React.TouchEvent) => {
-        if (gameState !== 'playing' && gameState !== 'neutron') return;
-        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-        setMousePos({ x: clientX, y: clientY });
+    const handleTouchStart = (e: React.TouchEvent) => {
+        if ((gameStateRef.current !== 'playing' && gameStateRef.current !== 'neutron') || isPausedRef.current) return;
+        const touch = e.touches[0];
+        if (touch) {
+            touchLastRef.current = { x: touch.clientX, y: touch.clientY };
+        }
     };
 
-    const resetGame = () => {
-        setStability(100);
-        setElementIndex(0);
-        setSolarMass(0.5);
-        setAlphasCaptured(0);
-        setDestiny(null);
-        setGameState('intro');
-        particlesRef.current = [];
+    const handleTouchMove = (e: React.TouchEvent) => {
+        if ((gameStateRef.current !== 'playing' && gameStateRef.current !== 'neutron') || isPausedRef.current) return;
+        const touch = e.touches[0];
+        if (!touch) return;
+        if (!touchLastRef.current) {
+            touchLastRef.current = { x: touch.clientX, y: touch.clientY };
+            return;
+        }
+        const dx = touch.clientX - touchLastRef.current.x;
+        const dy = touch.clientY - touchLastRef.current.y;
+        touchLastRef.current = { x: touch.clientX, y: touch.clientY };
+
+        targetPosRef.current = {
+            x: clamp(targetPosRef.current.x + dx * 1.2, 24, window.innerWidth - 24),
+            y: clamp(targetPosRef.current.y + dy * 1.2, 24, window.innerHeight - 24),
+        };
     };
+
+    const handleTouchEnd = () => {
+        touchLastRef.current = null;
+    };
+
+    const currentElement = ELEMENTS[elementIndex];
+    const isPlayingOrNeutron = gameState === 'playing' || gameState === 'neutron';
+    const spectralStateLabel =
+        spectralShift < -20 ? 'Blueshift · Slow Hazards' : spectralShift > 20 ? 'Redshift · 1.5× Mass' : 'Equilibrium';
+    const spectralStateColor =
+        spectralShift < -20 ? 'text-sky-300' : spectralShift > 20 ? 'text-rose-300' : 'text-slate-300';
+    const canVentMass = isPlayingOrNeutron && !isPaused && solarMass > 0.52 && ventCooldown <= 0;
 
     return (
-        <div 
-            className="relative w-full h-[100dvh] overflow-hidden bg-[#0f172a] text-slate-200 font-sans select-none touch-none"
+        <div
+            className="relative w-full h-[100dvh] overflow-hidden bg-[#070d1a] text-slate-200 font-sans select-none touch-none"
             onMouseMove={handleMouseMove}
-            onTouchMove={handleMouseMove}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
         >
-            {/* Chromatic Aberration Overlay for Spectral Shift */}
-            <div 
-                className="absolute inset-0 pointer-events-none z-[190] opacity-50"
+            {/* Subtle Spectral Edge Tint */}
+            <div
+                className="absolute inset-0 pointer-events-none z-[190] transition-opacity duration-150"
                 style={{
-                    boxShadow: Math.abs(spectralShift) > 20 
-                        ? `inset 0 0 ${Math.abs(spectralShift)}px ${spectralShift > 0 ? 'rgba(255,0,0,0.4)' : 'rgba(0,0,255,0.4)'}`
-                        : 'none',
-                    filter: `contrast(${100 + Math.abs(spectralShift)/2}%)`
+                    opacity: Math.abs(spectralShift) > 20 ? 0.55 : 0,
+                    boxShadow:
+                        Math.abs(spectralShift) > 20
+                            ? `inset 0 0 ${Math.min(110, Math.abs(spectralShift) * 1.1)}px ${
+                                  spectralShift > 0 ? 'rgba(244,63,94,0.32)' : 'rgba(56,189,248,0.32)'
+                              }`
+                            : 'none',
                 }}
             />
-            
-            {/* Subtle Peripheral Grain for Shift Feedback */}
-            <AnimatePresence>
-                {Math.abs(spectralShift) > 50 && (
-                    <motion.div 
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: [0, 0.2, 0] }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.1, repeat: Infinity }}
-                        className={`absolute inset-0 z-[191] pointer-events-none bg-gradient-to-r ${spectralShift > 0 ? 'from-red-500/10 via-transparent to-red-500/10' : 'from-blue-500/10 via-transparent to-blue-500/10'}`}
-                    />
-                )}
-            </AnimatePresence>
 
             <canvas ref={canvasRef} className="absolute inset-0 z-0" />
 
-            {/* UI Overlay */}
-            <div className="absolute top-0 left-0 right-0 p-4 sm:p-6 pt-[env(safe-area-inset-top,1rem)] flex flex-col sm:flex-row justify-between items-center sm:items-start pointer-events-none z-50 gap-4 sm:gap-0 bg-gradient-to-b from-black/60 to-transparent">
-                {/* Compact Stats Group */}
-                <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto items-center sm:items-start">
-                    <div className="bg-white/5 backdrop-blur-xl px-4 py-2 rounded-lg border border-white/10 w-full sm:w-52 shadow-2xl shrink-0">
-                        <div className="flex items-center justify-between mb-1.5">
-                            <div className="flex items-center gap-2">
-                                <Activity className="w-3 h-3 text-emerald-400" />
-                                <span className="text-[7px] sm:text-[9px] uppercase tracking-widest text-slate-300 font-bold">Stability</span>
-                            </div>
-                            <span className="text-[9px] font-mono text-emerald-400">{Math.ceil(stability)}%</span>
-                        </div>
-                        <div className="w-full h-1 bg-slate-800/50 rounded-full overflow-hidden relative">
-                            <motion.div 
-                                className={`absolute left-0 top-0 bottom-0 ${stability > 30 ? 'bg-emerald-500' : 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]'}`}
-                                animate={{ width: `${stability}%` }}
-                            />
-                        </div>
-                    </div>
-
-                    <div className="bg-white/5 backdrop-blur-xl px-4 py-2 rounded-lg border border-white/10 w-full sm:w-52 shadow-2xl shrink-0">
-                        <div className="flex items-center justify-between mb-1.5">
-                             <div className="flex items-center gap-2">
-                                <Scale className="w-3 h-3 text-amber-400" />
-                                <span className="text-[7px] sm:text-[9px] uppercase tracking-widest text-slate-300 font-bold">
-                                    {gameState === 'neutron' ? 'Density' : 'Mass'}
+            {/* Top HUD (Visible during Gameplay) */}
+            {isPlayingOrNeutron && (
+                <div className="absolute top-0 left-0 right-0 p-4 sm:p-6 pt-[env(safe-area-inset-top,1rem)] flex flex-col sm:flex-row justify-between items-stretch sm:items-start pointer-events-none z-50 gap-3 bg-gradient-to-b from-black/70 via-black/30 to-transparent">
+                    {/* Stability & Mass Meters */}
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="bg-slate-900/75 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-white/10 w-full sm:w-56 shadow-xl">
+                            <div className="flex items-center justify-between mb-1.5">
+                                <div className="flex items-center gap-2">
+                                    <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span className="text-[11px] uppercase tracking-wider text-slate-200 font-semibold">
+                                        Stability
+                                    </span>
+                                </div>
+                                <span
+                                    className={`text-xs font-mono font-semibold tabular-nums ${
+                                        stability > 30 ? 'text-emerald-400' : 'text-rose-400'
+                                    }`}
+                                >
+                                    {Math.ceil(stability)}% · {stability > 30 ? 'Stable' : 'Critical'}
                                 </span>
-                             </div>
-                             <span className={`text-[9px] font-mono ${solarMass >= 1.4 ? 'text-rose-500' : 'text-amber-400'}`}>
-                                {solarMass.toFixed(2)} M☉
-                             </span>
+                            </div>
+                            <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative">
+                                <div
+                                    className={`h-full transition-all duration-100 ${
+                                        stability > 30 ? 'bg-emerald-500' : 'bg-rose-500'
+                                    }`}
+                                    style={{ width: `${stability}%` }}
+                                />
+                            </div>
                         </div>
-                        <div className="w-full h-1 bg-slate-800/50 rounded-full overflow-hidden relative">
-                            <motion.div 
-                                className={`absolute left-0 top-0 bottom-0 ${solarMass >= 1.4 ? 'bg-rose-500' : 'bg-amber-400'}`}
-                                animate={{ width: `${(solarMass / 2.0) * 100}%` }}
-                            />
-                            {gameState !== 'neutron' && <div className="absolute left-[70%] top-0 bottom-0 w-[1px] bg-white/30" />}
+
+                        <div className="bg-slate-900/75 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-white/10 w-full sm:w-64 shadow-xl">
+                            <div className="flex items-center justify-between mb-1.5">
+                                <div className="flex items-center gap-2">
+                                    <Scale className="w-3.5 h-3.5 text-amber-400" />
+                                    <span className="text-[11px] uppercase tracking-wider text-slate-200 font-semibold">
+                                        Mass
+                                    </span>
+                                </div>
+                                <span
+                                    className={`text-xs font-mono font-semibold tabular-nums ${
+                                        solarMass >= 1.4 ? 'text-rose-400' : 'text-amber-300'
+                                    }`}
+                                >
+                                    {solarMass.toFixed(2)} M☉ · {solarMass >= 1.4 ? 'Supernova' : 'Dwarf'}
+                                </span>
+                            </div>
+                            <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative">
+                                <div
+                                    className={`h-full transition-all duration-100 ${
+                                        solarMass >= 1.4 ? 'bg-rose-500' : 'bg-amber-400'
+                                    }`}
+                                    style={{ width: `${(solarMass / 2.0) * 100}%` }}
+                                />
+                                <div
+                                    className="absolute left-[70%] top-0 bottom-0 w-0.5 bg-white/75"
+                                    title="1.40 M☉ Chandrasekhar Limit"
+                                />
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                {/* Right Side: Shield status */}
-                <div className="flex flex-col items-center sm:items-end gap-3 w-full sm:w-auto mt-2 sm:mt-0">
-                    {shieldTime > 0 && (
-                        <motion.div 
-                            initial={{ opacity: 0, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0, x: 20 }}
-                            className="bg-blue-900/50 backdrop-blur-md px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl border border-blue-400/30 flex items-center gap-2 sm:gap-3 shadow-2xl"
-                        >
-                            <Shield className="w-3 h-3 sm:w-4 sm:h-4 text-blue-400 animate-pulse" />
-                            <div className="flex flex-col">
-                                <span className="text-[6px] sm:text-[8px] uppercase tracking-[0.2em] text-blue-300 font-bold">Magnetic Shield</span>
-                                <div className="w-20 sm:w-24 h-1 bg-blue-900 rounded-full mt-1 relative overflow-hidden">
-                                    <motion.div 
-                                        className="absolute left-0 top-0 bottom-0 bg-blue-400"
-                                        animate={{ width: `${(shieldTime / 8) * 100}%` }}
-                                    />
+                    {/* Right Side: Spectral State & Active Shield */}
+                    <div className="flex items-center justify-between sm:justify-end gap-3">
+                        <div className="bg-slate-900/75 backdrop-blur-xl px-3.5 py-2 rounded-xl border border-white/10 text-xs font-mono">
+                            <span className={spectralStateColor}>{spectralStateLabel}</span>
+                        </div>
+
+                        {shieldTime > 0 && (
+                            <div className="bg-sky-950/85 backdrop-blur-md px-3.5 py-2 rounded-xl border border-sky-400/40 flex items-center gap-2.5 shadow-xl">
+                                <Shield className="w-4 h-4 text-sky-400" />
+                                <div className="flex flex-col">
+                                    <span className="text-[11px] uppercase tracking-wider text-sky-200 font-semibold tabular-nums">
+                                        Shield · {shieldTime.toFixed(1)}s
+                                    </span>
+                                    <div className="w-24 h-1 bg-sky-900 rounded-full mt-1 overflow-hidden">
+                                        <div
+                                            className="h-full bg-sky-400"
+                                            style={{ width: `${(shieldTime / 8) * 100}%` }}
+                                        />
+                                    </div>
                                 </div>
                             </div>
-                        </motion.div>
-                    )}
-                </div>
-            </div>
-
-            {/* Bottom Left: Atomic Data Area */}
-            <div className={`absolute bottom-6 sm:bottom-8 left-6 sm:left-8 pb-[env(safe-area-inset-bottom,0px)] pointer-events-none z-50 ${gameState === 'playing' ? 'md:hidden' : ''}`}>
-                <div className="bg-white/5 backdrop-blur-xl px-5 py-3 rounded-xl border border-white/10 text-left min-w-[140px] shadow-2xl pointer-events-auto">
-                    <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-[7px] sm:text-[9px] uppercase tracking-widest text-slate-300 font-bold">
-                            {gameState === 'neutron' ? 'Pulsar State' : 'Active Nucleus'}
-                        </span>
-                        <Zap className="w-3 h-3 text-blue-400" />
+                        )}
                     </div>
-                    <div className="text-2xl sm:text-3xl font-mono text-white leading-none tracking-tighter flex items-center gap-3">
-                        {currentElement.symbol}
+                </div>
+            )}
+
+            {/* Non-blocking Poetic Evolution Banner */}
+            <AnimatePresence>
+                {evolutionBanner && isPlayingOrNeutron && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -16 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -16 }}
+                        transition={{ duration: 0.25 }}
+                        className="fixed top-24 sm:top-24 left-1/2 -translate-x-1/2 z-[70] w-[92%] max-w-xl bg-slate-950/90 backdrop-blur-xl border border-white/15 rounded-2xl px-5 py-4 shadow-2xl pointer-events-auto"
+                    >
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="flex items-center gap-3.5">
+                                <div
+                                    className="w-11 h-11 rounded-xl flex items-center justify-center font-mono font-bold text-lg text-slate-950 shrink-0"
+                                    style={{ backgroundColor: evolutionBanner.color }}
+                                >
+                                    {evolutionBanner.symbol}
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                                        <span className="font-semibold text-white uppercase tracking-wider">
+                                            {evolutionBanner.name}
+                                        </span>
+                                        <span aria-hidden="true">·</span>
+                                        <span className="tabular-nums">{evolutionBanner.mass} amu</span>
+                                    </div>
+                                    <p className="font-serif italic text-sm sm:text-base text-slate-100 mt-1 leading-snug">
+                                        “{evolutionBanner.poem[0]} {evolutionBanner.poem[1]}”
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setEvolutionBanner(null)}
+                                aria-label="Dismiss evolution notice"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* First-Run On-Canvas Onboarding Hint */}
+            <AnimatePresence>
+                {showStartHint && gameState === 'playing' && !evolutionBanner && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed top-28 sm:top-24 left-1/2 -translate-x-1/2 z-[55] pointer-events-none bg-slate-950/85 backdrop-blur-md border border-white/10 px-4 py-2 rounded-xl text-xs text-slate-200 text-center max-w-[90%]"
+                    >
+                        Steer with <span className="text-white font-semibold">Mouse / Drag / WASD</span> · Catch{' '}
+                        <span className="text-sky-400 font-semibold">Blue α</span> · Dodge{' '}
+                        <span className="text-rose-400 font-semibold">Red Shards</span> ·{' '}
+                        <span className="text-amber-300 font-semibold">Space</span> to Vent Mass
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Solar Flare Imminent Banner */}
+            <AnimatePresence>
+                {flareWarning > 0 && isPlayingOrNeutron && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed top-40 sm:top-36 left-1/2 -translate-x-1/2 bg-rose-950/90 backdrop-blur-xl px-5 py-2.5 rounded-xl border border-rose-500/50 flex items-center gap-3 shadow-2xl z-[65] pointer-events-none"
+                    >
+                        <Flame className="w-4 h-4 text-rose-400 shrink-0" />
                         <div className="flex flex-col">
-                            <span className="text-[10px] text-blue-400 font-bold uppercase tracking-widest">
+                            <span className="text-xs font-semibold text-rose-200 tracking-wide">
+                                Solar Flare Imminent · Trace Nodes 1 → 2 → 3 for Shield
+                            </span>
+                            <div className="w-48 h-1 bg-rose-900 rounded-full mt-1.5 overflow-hidden">
+                                <div
+                                    className="h-full bg-rose-400"
+                                    style={{ width: `${(flareWarning / 3.2) * 100}%` }}
+                                />
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Active Solar Flare Ambient Overlay */}
+            {flareActive > 0 && isPlayingOrNeutron && (
+                <div className="fixed inset-0 bg-rose-500/10 pointer-events-none z-[40]" />
+            )}
+
+            {/* Neutron Pulse Final Sprint Banner */}
+            {gameState === 'neutron' && (
+                <div className="fixed top-28 sm:top-24 left-1/2 -translate-x-1/2 pointer-events-none z-[60] text-center w-[92%] max-w-md bg-slate-950/85 backdrop-blur-xl border border-amber-400/35 rounded-2xl px-5 py-3 shadow-2xl">
+                    <div className="text-amber-400 font-mono text-base sm:text-lg tracking-[0.2em] font-bold uppercase">
+                        Neutron Pulse · <span className="tabular-nums">{neutronTimeLeft.toFixed(1)}s</span>
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1 tabular-nums">
+                        {solarMass >= 1.4
+                            ? `${solarMass.toFixed(2)} M☉ reached — Supernova collapse locked (Vent Mass to stay Dwarf)`
+                            : `Need +${(1.4 - solarMass).toFixed(2)} M☉ from Isotopes to reach 1.40 M☉ Supernova`}
+                    </p>
+                </div>
+            )}
+
+            {/* Mobile Bottom-Left Compact Nucleus Card */}
+            {isPlayingOrNeutron && (
+                <div className="absolute bottom-6 left-4 sm:left-6 pb-[env(safe-area-inset-bottom,0px)] md:hidden z-50 pointer-events-none">
+                    <div className="bg-slate-900/80 backdrop-blur-xl px-4 py-3 rounded-xl border border-white/10 shadow-2xl min-w-[165px]">
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="text-[11px] uppercase tracking-wider text-slate-300 font-semibold">
                                 {gameState === 'neutron' ? 'Critical Core' : currentElement.name}
                             </span>
-                            <span className="text-[8px] text-slate-500">
-                                {gameState === 'neutron' ? "FINAL COLLAPSE" : `${currentElement.mass} amu`}
+                            <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+                                {currentElement.mass} amu
                             </span>
                         </div>
-                    </div>
-                    
-                    {/* Alpha Progress / Pulsar Beat */}
-                    <div className="mt-3 pt-2 border-t border-white/10">
-                        <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-[7px] text-slate-400 uppercase tracking-widest">
-                                {gameState === 'neutron' ? 'Subatomic Flux' : 'Fusion Step'}
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-2xl font-mono font-bold text-white leading-none">
+                                {currentElement.symbol}
                             </span>
-                            <span className="text-[8px] font-mono text-blue-400">
-                                {gameState === 'neutron' ? `${(stability / 10).toFixed(1)}%` : `${alphasCaptured}/4`}
-                            </span>
-                        </div>
-                        <div className="flex gap-1.5">
-                            {gameState === 'neutron' ? (
-                                <motion.div 
-                                    animate={{ opacity: [1, 0.4, 1] }} 
-                                    transition={{ duration: 0.1, repeat: Infinity }}
-                                    className="h-1 w-full rounded-full bg-blue-400 shadow-[0_0_15px_rgba(56,189,248,0.8)]"
-                                />
-                            ) : (
-                                [...Array(4)].map((_, i) => (
-                                    <div 
-                                        key={i} 
-                                        className={`h-1 w-5 rounded-full ${i < alphasCaptured ? 'bg-blue-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]' : 'bg-slate-700'}`} 
-                                    />
-                                ))
+                            {gameState === 'playing' && (
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-mono text-sky-400 tabular-nums">
+                                        {alphasCaptured}/{currentElement.alphasRequired} α
+                                    </span>
+                                </div>
                             )}
                         </div>
                     </div>
                 </div>
-            </div>
+            )}
 
-            {/* Bottom Element Progression Panel */}
-            {gameState === 'playing' && (
-                <div className="absolute bottom-6 sm:bottom-8 left-6 right-56 pb-[env(safe-area-inset-bottom,0px)] hidden md:flex items-center gap-4 p-3 pr-6 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10 z-50 overflow-x-auto shadow-2xl no-scrollbar">
-                    <div className="flex flex-col items-center border-r border-white/10 pr-4 mr-2 shrink-0">
-                        <span className="text-[7px] uppercase tracking-[0.2em] text-blue-400 font-bold mb-1">Active</span>
-                        <div className="flex items-center gap-2">
-                             <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-slate-900 font-black font-mono">
-                                {currentElement.symbol}
-                             </div>
-                             <div className="flex flex-col text-left">
-                                <span className="text-[10px] text-white font-bold tracking-wider">{currentElement.name}</span>
-                                <span className="text-[8px] text-slate-400">{currentElement.mass} amu</span>
-                             </div>
+            {/* Desktop Bottom Element Progression Strip */}
+            {isPlayingOrNeutron && (
+                <div className="absolute bottom-6 left-6 right-72 pb-[env(safe-area-inset-bottom,0px)] hidden md:flex items-center gap-4 p-3 pr-5 bg-slate-900/75 backdrop-blur-xl rounded-2xl border border-white/10 z-50 overflow-x-auto shadow-2xl no-scrollbar">
+                    <div className="flex items-center gap-3 border-r border-white/10 pr-4 shrink-0">
+                        <div
+                            className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-950 font-bold font-mono text-sm"
+                            style={{ backgroundColor: currentElement.color }}
+                        >
+                            {currentElement.symbol}
+                        </div>
+                        <div className="flex flex-col text-left">
+                            <span className="text-xs text-white font-semibold">{currentElement.name}</span>
+                            <span className="text-[11px] text-slate-400 font-mono tabular-nums">
+                                {gameState === 'neutron'
+                                    ? 'Neutron Collapse'
+                                    : `${alphasCaptured}/${currentElement.alphasRequired} α · ${currentElement.mass} amu`}
+                            </span>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 flex-nowrap sm:flex-wrap justify-start">
+                    <div className="flex items-center gap-1.5 flex-nowrap">
                         {ELEMENTS.map((el, idx) => {
                             const isNext = idx === elementIndex + 1;
                             const isPast = idx < elementIndex;
                             const isCurrent = idx === elementIndex;
-                            
+
                             return (
-                                <div 
-                                    key={idx}
-                                    className={`relative flex flex-col items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-lg border transition-all ${
-                                        isCurrent 
-                                        ? 'bg-blue-500 border-blue-400 scale-105 shadow-[0_0_15px_rgba(59,130,246,0.5)]' 
-                                        : isPast 
-                                        ? 'border-white/40 bg-white/20' 
-                                        : isNext
-                                        ? 'border-white/10 bg-white/5'
-                                        : 'border-white/5 bg-transparent opacity-20 grayscale'
+                                <div
+                                    key={el.symbol}
+                                    title={`${el.name} (${el.mass} amu)`}
+                                    className={`relative flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
+                                        isCurrent
+                                            ? 'bg-sky-500 border-sky-300 text-slate-950 font-bold shadow-lg'
+                                            : isPast
+                                            ? 'border-white/30 bg-white/15 text-white'
+                                            : isNext
+                                            ? 'border-sky-400/40 bg-white/5 text-slate-200'
+                                            : 'border-white/10 bg-transparent text-slate-500 opacity-50'
                                     }`}
                                 >
-                                    {isNext && (
-                                        <div className="absolute inset-0 overflow-hidden rounded-lg pointer-events-none">
-                                            <motion.div 
-                                                className="absolute bottom-0 left-0 right-0 bg-blue-400/30"
-                                                animate={{ height: `${(alphasCaptured / 4) * 100}%` }}
-                                            />
-                                        </div>
+                                    {isNext && gameState === 'playing' && (
+                                        <div
+                                            className="absolute bottom-0 left-0 right-0 bg-sky-400/25 rounded-b-lg pointer-events-none"
+                                            style={{
+                                                height: `${(alphasCaptured / currentElement.alphasRequired) * 100}%`,
+                                            }}
+                                        />
                                     )}
-                                    <span className={`text-[10px] sm:text-xs font-mono font-black ${isCurrent ? 'text-white' : 'text-slate-200'}`}>
-                                        {el.symbol}
-                                    </span>
-                                    {isNext && (
-                                        <div className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_5px_#38bdf8] animate-pulse" />
-                                    )}
+                                    <span className="text-xs font-mono font-bold relative z-10">{el.symbol}</span>
                                 </div>
                             );
                         })}
@@ -857,622 +1818,666 @@ export default function App() {
                 </div>
             )}
 
-            {/* Flare Warning */}
-            <AnimatePresence>
-                {flareWarning > 0 && (
-                    <motion.div 
-                        initial={{ opacity: 0, y: -20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed top-24 left-1/2 -translate-x-1/2 bg-rose-950/80 backdrop-blur-xl px-6 py-3 rounded-full border border-rose-500/50 flex items-center gap-3 shadow-2xl z-[60]"
+            {/* Bottom-Right Utility & Action Controls */}
+            <div className="absolute bottom-6 right-4 sm:right-6 pb-[env(safe-area-inset-bottom,0px)] flex items-center gap-2.5 z-[110]">
+                {isPlayingOrNeutron && (
+                    <button
+                        onClick={triggerVentMass}
+                        disabled={!canVentMass}
+                        title="Vent Mass (Space) — Shed 0.06 M☉ and push back Helium"
+                        className={`h-11 px-3.5 rounded-xl border flex items-center gap-2 text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${
+                            canVentMass
+                                ? 'bg-slate-900/90 border-sky-400/40 text-sky-200 hover:bg-sky-500/20 hover:border-sky-400 cursor-pointer'
+                                : 'bg-slate-900/60 border-white/10 text-slate-500 cursor-not-allowed'
+                        }`}
                     >
-                        <Flame className="w-5 h-5 text-rose-500 animate-bounce" />
-                        <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-rose-300 uppercase tracking-[0.2em]">Solar Flare Imminent</span>
-                            <div className="w-32 h-1 bg-rose-900 rounded-full mt-1 overflow-hidden">
-                                <motion.div 
-                                    className="h-full bg-rose-500"
-                                    animate={{ width: `${(flareWarning / 200) * 100}%` }}
-                                />
-                            </div>
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
-            {/* Flare Active Effect */}
-            <AnimatePresence>
-                {flareActive > 0 && (
-                    <motion.div 
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 0.15 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-rose-500 pointer-events-none z-[40]"
-                    />
-                )}
-            </AnimatePresence>
-
-            {/* Stage Overlays */}
-            <AnimatePresence mode="wait">
-                {gameState === 'intro' && (
-                    <motion.div 
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="absolute inset-0 flex flex-col items-center justify-start bg-[#020617]/98 backdrop-blur-3xl z-[100] p-4 sm:p-8 pt-[env(safe-area-inset-top,2rem)] pb-[env(safe-area-inset-bottom,2rem)] text-center overflow-y-auto selection:bg-blue-500/30 font-sans"
-                    >
-                        {/* Cinematic Grain/Noise Overlay */}
-                        <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://grainy-gradients.vercel.app/noise.svg')] brightness-100 contrast-150" />
-                        
-                        <div className="flex flex-col items-center max-w-4xl w-full py-8 sm:py-16 relative z-10 shrink-0">
-                            <motion.div 
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                transition={{ duration: 1.2, ease: "easeOut" }}
-                                className="mb-8 sm:mb-12 pointer-events-none"
-                            >
-                                <div className="flex items-center justify-center gap-4 mb-4">
-                                    <div className="h-[1px] w-6 sm:w-8 bg-blue-500/50" />
-                                    <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400 opacity-60" />
-                                    <div className="h-[1px] w-6 sm:w-8 bg-blue-500/50" />
-                                </div>
-                                <h1 className="text-4xl sm:text-7xl lg:text-8xl font-extralight tracking-[0.4em] sm:tracking-[0.5em] text-white leading-tight">STELLAR</h1>
-                                <p className="text-[9px] sm:text-[11px] text-blue-400 font-mono tracking-[0.3em] sm:tracking-[0.6em] uppercase mt-4 sm:mt-6 opacity-60">Epoch: Nucleosynthesis / Origin: Void</p>
-                            </motion.div>
-
-                            <motion.div 
-                                initial="hidden"
-                                animate="visible"
-                                variants={{
-                                    hidden: { opacity: 0 },
-                                    visible: {
-                                        opacity: 1,
-                                        transition: { staggerChildren: 0.3, delayChildren: 0.6 }
-                                    }
-                                }}
-                                className="space-y-16 mb-24 px-4 sm:px-12"
-                            >
-                                <motion.div 
-                                    variants={{ hidden: { opacity: 0, y: 10 }, visible: { opacity: 1, y: 0 } }}
-                                    className="max-w-2xl mx-auto border-l border-white/10 pl-6 sm:pl-8 py-2 text-left"
-                                >
-                                    <p className="text-[10px] sm:text-xs text-blue-300 font-mono tracking-widest uppercase mb-3 opacity-50">Log #001: The Weaver's Paradox</p>
-                                    <p className="text-sm sm:text-xl text-slate-200 font-light leading-relaxed italic tracking-wide">
-                                        "Before the first sun ignited, there was only the Squall—a cold, infinite gale of Helium-4, threatening to extinguish the spark of creation before it could even drift."
-                                    </p>
-                                </motion.div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 sm:gap-14 text-center">
-                                    <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }} className="group">
-                                        <div className="mb-3 sm:mb-4 flex justify-center">
-                                            <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full border border-white/10 flex items-center justify-center group-hover:border-blue-500/50 transition-colors">
-                                                <div className="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.5)]" />
-                                            </div>
-                                        </div>
-                                        <h3 className="text-[9px] sm:text-xs font-bold text-white uppercase tracking-[0.2em] sm:tracking-[0.25em] mb-2 sm:mb-3">The Gathering</h3>
-                                        <p className="text-[10px] sm:text-[13px] text-slate-400 leading-relaxed font-light">
-                                            Feed the core. Capture the Alpha isotopes to build your weight. Each fusion is a step toward evolution.
-                                        </p>
-                                    </motion.div>
-
-                                    <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }} className="group">
-                                        <div className="mb-3 sm:mb-4 flex justify-center">
-                                            <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full border border-white/10 flex items-center justify-center group-hover:border-emerald-500/50 transition-colors">
-                                                <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-emerald-400/50" />
-                                            </div>
-                                        </div>
-                                        <h3 className="text-[9px] sm:text-xs font-bold text-blue-400 uppercase tracking-[0.2em] sm:tracking-[0.25em] mb-2 sm:mb-3 font-mono">Inertia</h3>
-                                        <p className="text-[10px] sm:text-[13px] text-slate-400 leading-relaxed font-light">
-                                            As you swell, your center resists the helm. Heavier cores move with the grace of mountains.
-                                        </p>
-                                    </motion.div>
-
-                                    <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }} className="group">
-                                        <div className="mb-3 sm:mb-4 flex justify-center">
-                                            <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full border border-white/10 flex items-center justify-center group-hover:border-rose-500/50 transition-colors">
-                                                <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.5)]" />
-                                            </div>
-                                        </div>
-                                        <h3 className="text-[9px] sm:text-xs font-bold text-rose-400 uppercase tracking-[0.2em] sm:tracking-[0.25em] mb-2 sm:mb-3">The Threshold</h3>
-                                        <p className="text-[10px] sm:text-[13px] text-slate-400 leading-relaxed font-light">
-                                            <span className="text-rose-300 font-mono font-bold">1.4 M☉</span>. The barrier of survival. Cross it to burn in a Supernova flash, or stay beneath to endure.
-                                        </p>
-                                    </motion.div>
-                                </div>
-
-                                <motion.div variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }} className="pt-10">
-                                    <div className="flex flex-col gap-4">
-                                        <p className="text-[10px] text-blue-400 font-mono tracking-widest uppercase opacity-60">Select Stellar Genesis</p>
-                                        <div className="flex items-center justify-center gap-4 max-w-sm mx-auto p-1 bg-white/5 rounded-full border border-white/10">
-                                            {(['Nebula', 'Stellar', 'Quasar'] as const).map((lvl) => (
-                                                <button
-                                                    key={lvl}
-                                                    onClick={() => setDifficulty(lvl)}
-                                                    className={`flex-1 py-1.5 px-4 rounded-full text-[9px] uppercase tracking-widest transition-all ${difficulty === lvl ? 'bg-white text-black font-bold shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                                                >
-                                                    {lvl}
-                                                </button>
-                                            ))}
-                                        </div>
-                                        <div className="flex flex-col sm:flex-row justify-center gap-2 sm:gap-8 mt-2">
-                                            <p className={`text-[8px] uppercase tracking-widest transition-opacity ${difficulty === 'Nebula' ? 'opacity-100 text-emerald-400' : 'opacity-0 h-0 sm:h-auto overflow-hidden'}`}>Gentle drift. Stable core.</p>
-                                            <p className={`text-[8px] uppercase tracking-widest transition-opacity ${difficulty === 'Stellar' ? 'opacity-100 text-blue-400' : 'opacity-0 h-0 sm:h-auto overflow-hidden'}`}>Rhythmic bursts. Solar flares.</p>
-                                            <p className={`text-[8px] uppercase tracking-widest transition-opacity ${difficulty === 'Quasar' ? 'opacity-100 text-rose-500' : 'opacity-0 h-0 sm:h-auto overflow-hidden'}`}>Extreme density. Void storms.</p>
-                                        </div>
-                                    </div>
-                                </motion.div>
-                            </motion.div>
-
-                            <motion.button 
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 2.2, duration: 1 }}
-                                onClick={() => {
-                                    setGameState('playing');
-                                    playSound(440, 'sine', 0.2, 0.3);
-                                }}
-                                className="absolute bottom-6 sm:bottom-8 left-6 sm:left-8 right-56 pb-[env(safe-area-inset-bottom,0px)] group hidden md:flex items-center justify-center gap-12 p-3 bg-white text-black rounded-2xl z-[110] hover:scale-[1.01] transition-all shadow-2xl active:scale-95"
-                            >
-                                <div className="flex flex-col text-left">
-                                    <span className="text-[10px] font-bold tracking-[0.4em] uppercase">Ignite the Void</span>
-                                    <span className="text-[8px] opacity-40 uppercase tracking-widest font-mono">Stellar Genesis Sequence</span>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <span className="text-[9px] font-mono tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">READY</span>
-                                    <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
-                                </div>
-                            </motion.button>
-
-                            {/* Mobile Fallback Button */}
-                            <motion.button 
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 2.2, duration: 1 }}
-                                onClick={() => {
-                                    setGameState('playing');
-                                    playSound(440, 'sine', 0.2, 0.3);
-                                }}
-                                className="md:hidden group relative px-12 py-3.5 rounded-full bg-white text-black tracking-[0.5em] uppercase text-[9px] font-bold hover:scale-105 transition-all duration-500 active:scale-95 mb-12"
-                            >
-                                Ignite the Void
-                            </motion.button>
-                        </div>
-                    </motion.div>
+                        <Wind className="w-4 h-4" />
+                        <span>
+                            {ventCooldown > 0 ? `Vent ${ventCooldown.toFixed(1)}s` : 'Vent Mass'}
+                        </span>
+                    </button>
                 )}
 
-                {gameState === 'evolving' && (() => {
-                    const nextElement = ELEMENTS[elementIndex + 1] || currentElement;
-                    return (
-                        <motion.div 
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="absolute inset-0 flex flex-col items-center justify-start sm:justify-center bg-[#020617]/95 backdrop-blur-xl z-[90] p-6 sm:p-8 text-center overflow-y-auto"
-                        >
-                            {/* Flame Embers Animation */}
-                            <div className="absolute inset-0 pointer-events-none overflow-hidden">
-                                {[...Array(30)].map((_, i) => (
-                                    <motion.div
-                                        key={i}
-                                        initial={{ 
-                                            x: Math.random() * 100 + "%", 
-                                            y: "110%",
-                                            opacity: 0,
-                                            scale: Math.random() * 0.5 + 0.5
-                                        }}
-                                        animate={{ 
-                                            y: "-10%",
-                                            x: [
-                                                (Math.random() * 100) + "%",
-                                                (Math.random() * 100 + (Math.random() - 0.5) * 20) + "%"
-                                            ],
-                                            opacity: [0, 0.8, 0],
-                                            rotate: Math.random() * 360
-                                        }}
-                                        transition={{ 
-                                            duration: 4 + Math.random() * 6,
-                                            repeat: Infinity,
-                                            delay: Math.random() * 5,
-                                            ease: "linear"
-                                        }}
-                                        className="absolute w-1.5 h-1.5 rounded-full blur-[1px]"
-                                        style={{ 
-                                            backgroundColor: nextElement.color,
-                                            boxShadow: `0 0 12px ${nextElement.color}, 0 0 24px ${nextElement.color}`
-                                        }}
-                                    />
-                                ))}
-                            </div>
-
-                            {/* Elemental Background Tinge */}
-                            <div 
-                                className="absolute inset-0 pointer-events-none opacity-20"
-                                style={{ 
-                                    background: `radial-gradient(circle at center, ${nextElement.color}44 0%, transparent 70%)` 
-                                }}
-                            />
-                            <div 
-                                className="absolute bottom-0 inset-x-0 h-64 pointer-events-none opacity-30"
-                                style={{ 
-                                    background: `linear-gradient(to top, ${nextElement.color}22 0%, transparent 100%)` 
-                                }}
-                            />
-
-                            <div className="flex flex-col items-center py-12 sm:py-24 shrink-0 relative z-10">
-                                <motion.div 
-                                    initial={{ scale: 0.8, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    className="mb-6 flex flex-col items-center"
-                                >
-                                    <div 
-                                        className="text-5xl sm:text-7xl font-mono text-white font-black mb-2 px-6 py-2 border-b-2 shadow-2xl"
-                                        style={{ borderBottomColor: nextElement.color, boxShadow: `0 15px 30px -15px ${nextElement.color}99` }}
-                                    >
-                                        {nextElement.symbol}
-                                    </div>
-                                    <div className="text-xl sm:text-2xl font-mono tracking-[0.3em] uppercase" style={{ color: nextElement.color }}>
-                                        {nextElement.name}
-                                    </div>
-                                    <div className="text-xs text-slate-500 mt-2">
-                                        Atomic Mass: {nextElement.mass} amu
-                                    </div>
-                                    {ELEMENTS[elementIndex + 2] && (
-                                        <div 
-                                            className="mt-6 px-4 py-2 rounded-full border backdrop-blur-sm transition-all"
-                                            style={{ 
-                                                backgroundColor: `${ELEMENTS[elementIndex + 2].color}11`, 
-                                                borderColor: `${ELEMENTS[elementIndex + 2].color}33` 
-                                            }}
-                                        >
-                                            <span 
-                                                className="text-[10px] font-mono tracking-widest uppercase opacity-80"
-                                                style={{ color: ELEMENTS[elementIndex + 2].color }}
-                                            >
-                                                Upcoming Transition: {ELEMENTS[elementIndex + 2].name} ({ELEMENTS[elementIndex + 2].symbol})
-                                            </span>
-                                        </div>
-                                    )}
-                                </motion.div>
-
-                                <div className="w-24 sm:w-48 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent mb-8 sm:mb-12" />
-                                <h2 className="text-[8px] sm:text-xs uppercase tracking-[0.3em] sm:tracking-[0.5em] text-white/40 mb-6 font-bold font-mono">Successive Synthesis Complete</h2>
-                                <div className="flex flex-col gap-2 sm:gap-4">
-                                {(ELEMENTS[elementIndex + 1]?.poem || ["The evolution continues...", ""]).map((line, idx) => (
-                                    <motion.p 
-                                        key={idx} 
-                                        initial={{ opacity: 0, y: 20, filter: 'blur(10px)' }}
-                                        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                                        transition={{ delay: 0.5 + idx * 0.8, duration: 1.5, ease: "easeOut" }}
-                                        className="text-base sm:text-3xl font-serif italic text-white max-w-2xl leading-relaxed px-4 sm:px-6"
-                                    >
-                                        {line}
-                                    </motion.p>
-                                ))}
-                                </div>
-                                <div className="w-24 sm:w-48 h-[1px] bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-30 mt-8 sm:mb-12" />
-                            </div>
-                        </motion.div>
-                    );
-                })()}
-
-                {gameState === 'collapsed' && (
-                    <motion.div 
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="absolute inset-0 flex flex-col items-center justify-start sm:justify-center bg-black/95 backdrop-blur-3xl z-[150] p-6 sm:p-8 pt-[env(safe-area-inset-top,2rem)] pb-[env(safe-area-inset-bottom,2rem)] text-center overflow-y-auto"
-                    >
-                        <div className="flex flex-col items-center max-w-sm py-12 sm:py-24 shrink-0">
-                            <AlertCircle className="w-16 h-16 sm:w-20 sm:h-20 text-rose-500 mb-6 sm:mb-8 animate-pulse" />
-                            <h2 className="text-2xl sm:text-4xl font-bold tracking-tighter text-white mb-4 sm:mb-6 uppercase">Star Collapsed</h2>
-                            <p className="text-slate-400 mb-8 sm:mb-12 text-sm sm:text-base">The helium squall was too fierce. Your core has gone dark.</p>
-                            <button 
-                                onClick={resetGame}
-                                className="px-8 py-2.5 sm:px-10 sm:py-3 rounded-full border border-rose-500 text-rose-500 tracking-widest uppercase text-[10px] sm:text-xs hover:bg-rose-500/10"
-                            >
-                                Emerge from Ash
-                            </button>
-                        </div>
-                    </motion.div>
-                )}
-
-                {gameState === 'ascended' && (
-                    <motion.div 
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className={`absolute inset-0 flex flex-col items-center justify-start sm:justify-center ${destiny === 'supernova' ? 'bg-[#1a0505]' : 'bg-[#0f172a]'} z-[200] p-6 sm:p-8 pt-[env(safe-area-inset-top,2rem)] pb-[env(safe-area-inset-bottom,2rem)] text-center overflow-y-auto`}
-                    >
-                        <div className="flex flex-col items-center py-12 sm:py-24 max-w-2xl shrink-0">
-                            {destiny === 'supernova' && (
-                                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none">
-                                    {[...Array(12)].map((_, i) => (
-                                        <motion.div
-                                            key={i}
-                                            initial={{ scale: 0, opacity: 1 }}
-                                            animate={{ 
-                                                scale: [0, 15], 
-                                                opacity: [1, 0],
-                                                borderWidth: ["10px", "0px"]
-                                            }}
-                                            transition={{ 
-                                                duration: 1.5, 
-                                                delay: i * 0.15,
-                                                repeat: Infinity,
-                                                ease: "easeOut"
-                                            }}
-                                            className="absolute w-32 h-32 rounded-full border border-[#fbbf24] blur-[2px]"
-                                        />
-                                    ))}
-                                    {[...Array(40)].map((_, i) => (
-                                        <motion.div
-                                            key={`p-${i}`}
-                                            initial={{ x: 0, y: 0, opacity: 1, scale: 1 }}
-                                            animate={{ 
-                                                x: (Math.random() - 0.5) * 800,
-                                                y: (Math.random() - 0.5) * 800,
-                                                opacity: 0,
-                                                scale: 0
-                                            }}
-                                            transition={{ 
-                                                duration: 1 + Math.random(), 
-                                                repeat: Infinity,
-                                                delay: Math.random() * 2,
-                                                ease: "easeOut"
-                                            }}
-                                            className="absolute w-2 h-2 bg-[#fbbf24] rounded-full blur-[1px]"
-                                        />
-                                    ))}
-                                </div>
-                            )}
-
-                            <motion.div 
-                                initial={{ scale: 0 }}
-                                animate={{ 
-                                    scale: destiny === 'supernova' ? [0, 1.2, 1] : 1,
-                                    rotate: destiny === 'supernova' ? [0, 10, -10, 0] : 0 
-                                }}
-                                transition={{ 
-                                    scale: { duration: 0.8, ease: "backOut" },
-                                    rotate: { duration: 2, repeat: Infinity, ease: "easeInOut" }
-                                }}
-                                className={`w-32 h-32 sm:w-48 sm:h-48 rounded-full ${destiny === 'supernova' ? 'bg-[#fbbf24] shadow-[0_0_120px_rgba(251,191,36,1)]' : 'bg-slate-100 shadow-[0_0_100px_rgba(255,255,255,0.4)]'} flex flex-col items-center justify-center mb-8 sm:mb-12 relative z-10`}
-                            >
-                                {destiny === 'supernova' ? (
-                                    <>
-                                        <Flame className="w-8 h-8 sm:w-12 sm:h-12 text-slate-900 mb-2" />
-                                        <span className="text-3xl sm:text-5xl font-light text-slate-900 leading-none">Au</span>
-                                        <span className="text-[8px] sm:text-[10px] text-slate-900 font-bold uppercase tracking-widest mt-1">Gold</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Gem className="w-8 h-8 sm:w-12 sm:h-12 text-blue-900 mb-2" />
-                                        <span className="text-3xl sm:text-5xl font-light text-blue-900 leading-none">C</span>
-                                        <span className="text-[8px] sm:text-[10px] text-blue-900 font-bold uppercase tracking-widest mt-1">Diamond</span>
-                                    </>
-                                )}
-                            </motion.div>
-
-                            <h2 className={`text-xl sm:text-4xl font-light tracking-[0.2em] sm:tracking-[0.4em] ${destiny === 'supernova' ? 'text-[#fbbf24]' : 'text-blue-200'} uppercase mb-4`}>
-                                {destiny === 'supernova' ? 'Path of Power: Supernova' : 'Path of Peace: White Dwarf'}
-                            </h2>
-
-                            <div className="flex flex-col gap-2 mb-8 sm:mb-12">
-                                {destiny === 'supernova' ? (
-                                    <>
-                                        <p className="text-base sm:text-2xl font-serif italic text-rose-300 max-w-xl px-4 sm:px-6">
-                                            "In one great flash, the dark is torn,"
-                                        </p>
-                                        <p className="text-base sm:text-2xl font-serif italic text-rose-300 max-w-xl px-4 sm:px-6">
-                                            "So that the rarest gold is born."
-                                        </p>
-                                    </>
-                                ) : (
-                                    <>
-                                        <p className="text-base sm:text-2xl font-serif italic text-blue-100 max-w-xl px-4 sm:px-6">
-                                            "A quiet light that never dies,"
-                                        </p>
-                                        <p className="text-base sm:text-2xl font-serif italic text-blue-100 max-w-xl px-4 sm:px-6">
-                                            "A steady love in sapphire skies."
-                                        </p>
-                                    </>
-                                )}
-                            </div>
-
-                            <p className="text-slate-400 mb-8 sm:mb-12 max-w-md text-xs sm:text-sm leading-relaxed px-4">
-                                {destiny === 'supernova' 
-                                    ? "Your extreme mass triggered a total core collapse. In the cataclysmic rebound, the heaviest elements of the universe were forged."
-                                    : "By maintaining a stable, low mass, you shed your outer layers in a beautiful nebula, leaving behind a steady, eternal crystal core."
-                                }
-                            </p>
-
-                            <div className="flex flex-col sm:flex-row gap-4 mt-8 sm:mt-12">
-                                <button 
-                                    onClick={resetGame}
-                                    className={`px-8 py-2.5 sm:px-10 sm:py-3 rounded-full border ${destiny === 'supernova' ? 'border-[#fbbf24] text-[#fbbf24]' : 'border-blue-300 text-blue-300'} tracking-widest uppercase text-[10px] sm:text-xs hover:opacity-80 transition-all`}
-                                >
-                                    Begin the cycle anew
-                                </button>
-                            </div>
-                        </div>
-                    </motion.div>
-                )}
-
-                {gameState === 'neutron' && (
-                    <div className="absolute top-32 sm:top-28 left-1/2 -translate-x-1/2 pt-[env(safe-area-inset-top,0px)] pointer-events-none z-[100] text-center w-full">
-                        <motion.h2 
-                            animate={{ scale: [1, 1.1, 1], opacity: [0.5, 1, 0.5] }}
-                            transition={{ duration: 0.5, repeat: Infinity }}
-                            className="text-[#fbbf24] font-mono text-2xl sm:text-3xl tracking-[0.5em] font-black uppercase"
-                        >
-                            Neutron Pulse
-                        </motion.h2>
-                        <p className="text-white/50 text-[10px] uppercase tracking-widest mt-2">
-                            Critical Flux Active • {neutronTimeLeft.toFixed(1)}s Remaining
-                        </p>
-                    </div>
-                )}
-            </AnimatePresence>
-
-            {/* Controls */}
-
-            <div className="absolute bottom-8 right-8 pb-[env(safe-area-inset-bottom,0px)] flex items-center gap-3 z-[100]">
-                {gameState === 'playing' && (
-                    <button 
-                        onClick={() => setIsPaused(!isPaused)}
-                        className="p-3 bg-[#0f172a] rounded-full shadow-[5px_5px_10px_#060a12,-5px_-5px_10px_#182442] text-slate-400 hover:text-emerald-400 transition-colors"
+                {isPlayingOrNeutron && (
+                    <button
+                        onClick={() => setIsPaused(prev => !prev)}
+                        aria-label={isPaused ? 'Resume game' : 'Pause game'}
+                        title={isPaused ? 'Resume (P)' : 'Pause (P)'}
+                        className="w-11 h-11 bg-slate-900/90 border border-white/10 rounded-xl flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:border-emerald-400/40 transition-colors"
                     >
                         {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
                     </button>
                 )}
-                <button 
-                    onClick={() => setIsMuted(!isMuted)}
-                    className="p-3 bg-[#0f172a] rounded-full shadow-[5px_5px_10px_#060a12,-5px_-5px_10px_#182442] text-slate-400 hover:text-blue-400 transition-colors"
+
+                <button
+                    onClick={openCodexModal}
+                    aria-label="Open Stellar Codex"
+                    title="Stellar Codex"
+                    className="w-11 h-11 bg-slate-900/90 border border-white/10 rounded-xl flex items-center justify-center text-slate-300 hover:text-amber-300 hover:border-amber-400/40 transition-colors"
+                >
+                    <Library className="w-4 h-4" />
+                </button>
+
+                <button
+                    onClick={() => setIsMuted(prev => !prev)}
+                    aria-label={isMuted ? 'Unmute audio' : 'Mute audio'}
+                    title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
+                    className="w-11 h-11 bg-slate-900/90 border border-white/10 rounded-xl flex items-center justify-center text-slate-300 hover:text-sky-400 hover:border-sky-400/40 transition-colors"
                 >
                     {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                 </button>
 
-                <button 
-                    onClick={() => {
-                        setShowHelp(true);
-                        setIsPaused(true);
-                    }}
-                    className="p-3 bg-[#0f172a] rounded-full shadow-[5px_5px_10px_#060a12,-5px_-5px_10px_#182442] text-slate-400 hover:text-amber-400 transition-colors"
+                <button
+                    onClick={openHelpModal}
+                    aria-label="Open Stellar Manual"
+                    title="Manual & Controls"
+                    className="w-11 h-11 bg-slate-900/90 border border-white/10 rounded-xl flex items-center justify-center text-slate-300 hover:text-white hover:border-white/30 transition-colors"
                 >
                     <HelpCircle className="w-4 h-4" />
                 </button>
             </div>
 
-            {/* Help Modal */}
+            {/* Pause Overlay */}
             <AnimatePresence>
-                {showHelp && (
-                    <motion.div 
+                {isPaused && isPlayingOrNeutron && !showHelp && !showCodex && (
+                    <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-[1000] flex items-center justify-center p-4 sm:p-8 bg-black/80 backdrop-blur-md"
+                        className="fixed inset-0 z-[85] bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-6"
                     >
-                        <motion.div 
-                            initial={{ scale: 0.9, y: 20 }}
-                            animate={{ scale: 1, y: 0 }}
-                            exit={{ scale: 0.9, y: 20 }}
-                            className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-4xl max-h-[85dvh] overflow-y-auto overflow-x-hidden shadow-2xl no-scrollbar"
-                        >
-                            <div className="p-8 sm:p-12 pb-[env(safe-area-inset-bottom,2rem)] pt-[env(safe-area-inset-top,2rem)] relative">
-                                <button 
-                                    onClick={() => setShowHelp(false)}
-                                    className="absolute top-6 right-6 p-2 text-slate-400 hover:text-white transition-colors"
+                        <div className="bg-slate-900 border border-white/10 rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl">
+                            <h2 className="text-2xl font-light tracking-widest uppercase text-white mb-2">
+                                Simulation Paused
+                            </h2>
+                            <p className="text-sm text-slate-400 mb-6">
+                                Active core: {currentElement.name} ({currentElement.symbol}) · {solarMass.toFixed(2)} M☉
+                            </p>
+                            <div className="flex flex-col gap-3">
+                                <button
+                                    onClick={() => setIsPaused(false)}
+                                    className="w-full py-3 px-6 rounded-xl bg-white text-slate-950 font-semibold text-sm hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
                                 >
-                                    <Zap className="w-6 h-6 rotate-45" />
+                                    <Play className="w-4 h-4" />
+                                    Resume
+                                </button>
+                                <button
+                                    onClick={() => resetSimulation('intro')}
+                                    className="w-full py-3 px-6 rounded-xl border border-white/15 text-slate-300 text-sm hover:bg-white/5 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <RotateCcw className="w-4 h-4" />
+                                    Return to Title
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Stage Screens: Intro / Collapsed / Ascended */}
+            <AnimatePresence mode="wait">
+                {gameState === 'intro' && (
+                    <motion.div
+                        key="intro"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.25 }}
+                        className="absolute inset-0 flex flex-col items-center justify-start sm:justify-center bg-[#060b18]/92 backdrop-blur-2xl z-[100] p-6 sm:p-10 pt-[env(safe-area-inset-top,2rem)] pb-24 text-center overflow-y-auto"
+                    >
+                        <div className="flex flex-col items-center max-w-4xl w-full relative z-10">
+                            <p className="text-xs font-mono tracking-[0.35em] uppercase text-sky-400 mb-3">
+                                Stellar Nucleosynthesis Simulation
+                            </p>
+                            <h1 className="text-5xl sm:text-7xl font-light tracking-[0.28em] text-white mb-4">
+                                STELLAR
+                            </h1>
+                            <p className="max-w-xl text-sm sm:text-base text-slate-300 font-light leading-relaxed mb-10">
+                                Guide your stellar core from Carbon to Iron through the Helium squall. Balance mass
+                                against the <span className="font-mono text-rose-300 font-semibold">1.40 M☉</span>{' '}
+                                Chandrasekhar Limit to choose your final destiny.
+                            </p>
+
+                            {/* 3 Clear Pillars */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full mb-10 text-left">
+                                <div className="bg-white/[0.03] border border-white/10 rounded-2xl p-5">
+                                    <div className="flex items-center gap-2.5 mb-2">
+                                        <span className="w-3 h-3 rounded-full bg-sky-400 inline-block" />
+                                        <h3 className="text-xs font-bold uppercase tracking-widest text-white">
+                                            01. Fuse Elements
+                                        </h3>
+                                    </div>
+                                    <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                                        Capture <span className="text-sky-300 font-medium">Blue α Orbs</span> to evolve
+                                        from Carbon to Iron. Dodge sharp{' '}
+                                        <span className="text-rose-300 font-medium">Red Helium</span> shards.
+                                    </p>
+                                </div>
+
+                                <div className="bg-white/[0.03] border border-white/10 rounded-2xl p-5">
+                                    <div className="flex items-center gap-2.5 mb-2">
+                                        <span className="w-3 h-3 rounded-full bg-emerald-400 inline-block" />
+                                        <h3 className="text-xs font-bold uppercase tracking-widest text-white">
+                                            02. Bend Tempo
+                                        </h3>
+                                    </div>
+                                    <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                                        Glide slowly for <span className="text-sky-300 font-medium">Blueshift</span>{' '}
+                                        (slows hazards &amp; pulls α), or dash fast for{' '}
+                                        <span className="text-rose-300 font-medium">Redshift</span> (1.5× isotope mass).
+                                    </p>
+                                </div>
+
+                                <div className="bg-white/[0.03] border border-white/10 rounded-2xl p-5">
+                                    <div className="flex items-center gap-2.5 mb-2">
+                                        <span className="w-3 h-3 rounded-full bg-amber-400 inline-block" />
+                                        <h3 className="text-xs font-bold uppercase tracking-widest text-white">
+                                            03. Shape Destiny
+                                        </h3>
+                                    </div>
+                                    <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                                        Collect Isotopes to gain mass or press{' '}
+                                        <span className="text-amber-300 font-medium">Space / Vent Mass</span> to stay
+                                        under 1.40 M☉.
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Difficulty Selector + Immediate Start CTA */}
+                            <div className="flex flex-col items-center gap-4 w-full max-w-md">
+                                <div className="flex items-center gap-1.5 p-1.5 bg-white/5 rounded-xl border border-white/10 w-full">
+                                    {(['Nebula', 'Stellar', 'Quasar'] as const).map(lvl => (
+                                        <button
+                                            key={lvl}
+                                            onClick={() => setDifficulty(lvl)}
+                                            className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold tracking-wider uppercase transition-all whitespace-nowrap ${
+                                                difficulty === lvl
+                                                    ? 'bg-white text-slate-950 shadow-md'
+                                                    : 'text-slate-400 hover:text-white'
+                                            }`}
+                                        >
+                                            {lvl}
+                                        </button>
+                                    ))}
+                                </div>
+                                <p className={`text-xs ${DIFFICULTY_CONFIG[difficulty].accentClass}`}>
+                                    {DIFFICULTY_CONFIG[difficulty].tagline}
+                                </p>
+
+                                <button
+                                    onClick={() => resetSimulation('playing')}
+                                    className="w-full py-3.5 px-8 rounded-xl bg-white text-slate-950 font-bold text-sm uppercase tracking-[0.2em] hover:bg-sky-100 transition-all shadow-xl flex items-center justify-center gap-3 active:scale-[0.98]"
+                                >
+                                    <span>Start Simulation</span>
+                                    <ArrowRight className="w-4 h-4" />
                                 </button>
 
-                                <div className="flex items-center gap-4 mb-8">
-                                    <div className="p-3 bg-amber-500/10 rounded-2xl border border-amber-500/20">
-                                        <BookOpen className="w-8 h-8 text-amber-500" />
+                                <div className="flex items-center gap-6 text-xs text-slate-400 pt-1">
+                                    <button
+                                        onClick={openHelpModal}
+                                        className="hover:text-white underline underline-offset-4 transition-colors"
+                                    >
+                                        Read Manual
+                                    </button>
+                                    <span aria-hidden="true">·</span>
+                                    <button
+                                        onClick={openCodexModal}
+                                        className="hover:text-amber-300 underline underline-offset-4 transition-colors"
+                                    >
+                                        Stellar Codex ({codex.unlockedElements.length}/{ELEMENTS.length})
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+
+                {gameState === 'collapsed' && (
+                    <motion.div
+                        key="collapsed"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-2xl z-[150] p-6 text-center overflow-y-auto"
+                    >
+                        <div className="flex flex-col items-center max-w-md w-full py-8">
+                            <AlertCircle className="w-16 h-16 text-rose-500 mb-5" />
+                            <h2 className="text-3xl font-light tracking-widest text-white mb-2 uppercase">
+                                Star Collapsed
+                            </h2>
+                            <p className="text-slate-300 text-sm mb-6">
+                                The helium squall overwhelmed your core before synthesis could complete.
+                            </p>
+
+                            {runSummary && (
+                                <div className="w-full bg-white/[0.04] border border-white/10 rounded-2xl p-4 mb-6 grid grid-cols-2 gap-3 text-left">
+                                    <div>
+                                        <div className="text-[11px] text-slate-400">Final Core</div>
+                                        <div className="text-sm font-semibold text-white">
+                                            {runSummary.finalElement} ({runSummary.finalSymbol})
+                                        </div>
                                     </div>
                                     <div>
-                                        <h2 className="text-3xl font-light tracking-tighter text-white">Stellar Manual</h2>
-                                        <p className="text-slate-400 text-sm tracking-widest uppercase">Navigation & Nucleosynthesis</p>
+                                        <div className="text-[11px] text-slate-400">Peak Mass</div>
+                                        <div className="text-sm font-mono font-semibold text-amber-300 tabular-nums">
+                                            {runSummary.peakMass.toFixed(2)} M☉
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-[11px] text-slate-400">Alphas Fused</div>
+                                        <div className="text-sm font-mono font-semibold text-sky-300 tabular-nums">
+                                            {runSummary.alphasFused}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-[11px] text-slate-400">Duration</div>
+                                        <div className="text-sm font-mono font-semibold text-slate-200 tabular-nums">
+                                            {Math.round(runSummary.timeSurvivedSec)}s · {runSummary.difficulty}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex flex-col sm:flex-row gap-3 w-full">
+                                <button
+                                    onClick={() => resetSimulation('playing')}
+                                    className="flex-1 px-6 py-3 rounded-xl bg-rose-500 text-white font-semibold text-sm hover:bg-rose-400 transition-colors"
+                                >
+                                    Play Again
+                                </button>
+                                <button
+                                    onClick={() => resetSimulation('intro')}
+                                    className="flex-1 px-6 py-3 rounded-xl border border-white/15 text-slate-200 text-sm hover:bg-white/5 transition-colors"
+                                >
+                                    Change Mode
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+
+                {gameState === 'ascended' && destiny && (
+                    <motion.div
+                        key="ascended"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className={`absolute inset-0 flex flex-col items-center justify-start sm:justify-center ${
+                            destiny === 'supernova' ? 'bg-[#170609]' : 'bg-[#081226]'
+                        } z-[200] p-6 sm:p-8 pt-[env(safe-area-inset-top,2rem)] pb-24 text-center overflow-y-auto`}
+                    >
+                        <div className="flex flex-col items-center py-6 max-w-xl w-full relative z-10">
+                            <motion.div
+                                initial={{ scale: 0.7, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                transition={{ duration: 0.5 }}
+                                className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full ${
+                                    destiny === 'supernova'
+                                        ? 'bg-amber-400 shadow-[0_0_90px_rgba(251,191,36,0.75)]'
+                                        : 'bg-slate-100 shadow-[0_0_80px_rgba(148,163,184,0.45)]'
+                                } flex flex-col items-center justify-center mb-7`}
+                            >
+                                {destiny === 'supernova' ? (
+                                    <Flame className="w-8 h-8 text-slate-950 mb-1" />
+                                ) : (
+                                    <Gem className="w-8 h-8 text-sky-950 mb-1" />
+                                )}
+                                <span className="text-4xl font-light text-slate-950 leading-none">
+                                    {DESTINY_POEMS[destiny].symbol}
+                                </span>
+                                <span className="text-xs text-slate-900 font-bold uppercase tracking-widest mt-1">
+                                    {DESTINY_POEMS[destiny].name}
+                                </span>
+                            </motion.div>
+
+                            <p className="text-xs font-mono uppercase tracking-[0.25em] text-slate-400 mb-1">
+                                {DESTINY_POEMS[destiny].subtitle}
+                            </p>
+                            <h2
+                                className={`text-2xl sm:text-4xl font-light tracking-[0.25em] uppercase mb-5 ${
+                                    destiny === 'supernova' ? 'text-amber-300' : 'text-sky-200'
+                                }`}
+                            >
+                                {DESTINY_POEMS[destiny].title}
+                            </h2>
+
+                            <div className="mb-5 space-y-1">
+                                <p className="text-lg sm:text-2xl font-serif italic text-white">
+                                    “{DESTINY_POEMS[destiny].poem[0]}”
+                                </p>
+                                <p className="text-lg sm:text-2xl font-serif italic text-white">
+                                    “{DESTINY_POEMS[destiny].poem[1]}”
+                                </p>
+                            </div>
+
+                            <p className="text-slate-300 mb-6 max-w-md text-xs sm:text-sm leading-relaxed">
+                                {DESTINY_POEMS[destiny].summary}
+                            </p>
+
+                            {runSummary && (
+                                <div className="w-full bg-white/[0.04] border border-white/10 rounded-2xl p-4 mb-6 grid grid-cols-3 gap-3 text-center">
+                                    <div>
+                                        <div className="text-[11px] text-slate-400">Final Mass</div>
+                                        <div className="text-sm font-mono font-semibold text-amber-300 tabular-nums">
+                                            {solarMass.toFixed(2)} M☉
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-[11px] text-slate-400">Alphas Fused</div>
+                                        <div className="text-sm font-mono font-semibold text-sky-300 tabular-nums">
+                                            {runSummary.alphasFused}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-[11px] text-slate-400">Run Time</div>
+                                        <div className="text-sm font-mono font-semibold text-slate-200 tabular-nums">
+                                            {Math.round(runSummary.timeSurvivedSec)}s
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm">
+                                <button
+                                    onClick={() => resetSimulation('playing')}
+                                    className="flex-1 px-6 py-3 rounded-xl bg-white text-slate-950 font-semibold text-sm hover:bg-slate-200 transition-colors"
+                                >
+                                    Play Again
+                                </button>
+                                <button
+                                    onClick={openCodexModal}
+                                    className="flex-1 px-6 py-3 rounded-xl border border-white/20 text-white text-sm hover:bg-white/10 transition-colors"
+                                >
+                                    View Codex
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Help / Manual Modal */}
+            <AnimatePresence>
+                {showHelp && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={closeHelpModal}
+                        className="fixed inset-0 z-[1000] flex items-center justify-center p-4 sm:p-8 bg-black/80 backdrop-blur-md"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, y: 12 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.95, y: 12 }}
+                            onClick={e => e.stopPropagation()}
+                            className="bg-slate-900 border border-white/15 rounded-3xl w-full max-w-3xl max-h-[85dvh] overflow-y-auto shadow-2xl no-scrollbar"
+                        >
+                            <div className="p-6 sm:p-10 relative">
+                                <button
+                                    onClick={closeHelpModal}
+                                    aria-label="Close Manual"
+                                    className="absolute top-5 right-5 p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+
+                                <div className="flex items-center gap-3.5 mb-7">
+                                    <div className="p-2.5 bg-amber-500/15 rounded-xl border border-amber-500/25">
+                                        <BookOpen className="w-6 h-6 text-amber-400" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl font-semibold text-white">Stellar Manual</h2>
+                                        <p className="text-slate-400 text-xs uppercase tracking-widest">
+                                            Controls, Tempo &amp; Nucleosynthesis
+                                        </p>
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                                    {/* Mechanics Section */}
-                                    <section>
-                                        <div className="flex items-center gap-2 mb-6">
-                                            <Cpu className="w-5 h-5 text-emerald-400" />
-                                            <h3 className="text-xl text-emerald-400 font-medium tracking-tight">Mission Logs (How to Play)</h3>
-                                        </div>
-                                        
-                                        <div className="space-y-6">
-                                            <div className="bg-white/5 p-4 rounded-2xl border border-white/5 group">
-                                                <h4 className="text-slate-200 font-bold mb-2 flex items-center gap-2">
-                                                    <div className="w-1 h-4 bg-emerald-500 rounded-full" />
-                                                    The Action: Navigation
-                                                </h4>
-                                                <p className="text-slate-400 text-sm leading-relaxed">
-                                                    You control the star's nucleus. Move your cursor (or drag) to navigate. Shift your perspective near the edges to manipulate the <span className="text-blue-400">Time-Space Continuum</span>.
-                                                </p>
-                                                <ul className="mt-3 text-xs text-slate-500 space-y-1">
-                                                    <li>• <span className="text-blue-400">Right/Down:</span> Redshift (Fast forward, harder)</li>
-                                                    <li>• <span className="text-red-400">Left/Up:</span> Blueshift (Slow motion, safer)</li>
-                                                </ul>
-                                            </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <section className="space-y-4">
+                                        <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-400">
+                                            Controls &amp; Spectral Tempo
+                                        </h3>
 
-                                            <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-                                                <h4 className="text-slate-200 font-bold mb-2 flex items-center gap-2">
-                                                    <div className="w-1 h-4 bg-amber-500 rounded-full" />
-                                                    The Reward: Fusion
-                                                </h4>
-                                                <p className="text-slate-400 text-sm leading-relaxed">
-                                                    Capture <span className="text-blue-400">Alpha Particles</span> (blue pulses) to prepare for fusion. Gain mass with <span className="text-emerald-400">Isotopes</span>. Avoid <span className="text-rose-500">Helium Flux</span> that bleeds your internal stability.
-                                                </p>
-                                                <ul className="mt-3 text-xs text-slate-500 space-y-1">
-                                                    <li>• <span className="text-white">Convection Nodes:</span> Flow through nodes 1-2-3 for a temporary Magnetic Shield.</li>
-                                                </ul>
-                                            </div>
+                                        <div className="bg-white/[0.04] p-4 rounded-2xl border border-white/10 space-y-2 text-sm text-slate-300">
+                                            <p>
+                                                Steer with your <span className="text-white font-medium">mouse</span>,{' '}
+                                                <span className="text-white font-medium">relative touch drag</span>, or{' '}
+                                                <span className="text-white font-medium">WASD / Arrow keys</span>.
+                                                Heavier elements carry greater inertia.
+                                            </p>
+                                            <ul className="text-xs text-slate-400 space-y-1.5 pt-1">
+                                                <li>
+                                                    • <span className="text-sky-300 font-semibold">Blueshift (Slow):</span>{' '}
+                                                    Slows incoming Helium hazards by 35% and pulls Blue α orbs toward you.
+                                                </li>
+                                                <li>
+                                                    • <span className="text-rose-300 font-semibold">Redshift (Fast):</span>{' '}
+                                                    Accelerates flux and grants <span className="text-white">1.5× mass</span>{' '}
+                                                    from Isotopes.
+                                                </li>
+                                                <li>
+                                                    • <span className="text-amber-300 font-semibold">Space / Vent Mass:</span>{' '}
+                                                    Sheds 0.06 M☉ in a shockwave that vaporizes nearby Helium hazards.
+                                                </li>
+                                            </ul>
+                                        </div>
+
+                                        <div className="bg-white/[0.04] p-4 rounded-2xl border border-white/10 space-y-2 text-sm text-slate-300">
+                                            <p className="font-semibold text-white">Particles &amp; Flares</p>
+                                            <ul className="text-xs text-slate-400 space-y-1.5">
+                                                <li>
+                                                    • <span className="text-sky-400 font-semibold">Blue α Orbs:</span>{' '}
+                                                    Advance your core from Carbon (C) up to Iron (Fe).
+                                                </li>
+                                                <li>
+                                                    • <span className="text-amber-300 font-semibold">Hex Isotopes:</span>{' '}
+                                                    Increase your Solar Mass (M☉) and heal +4% Stability.
+                                                </li>
+                                                <li>
+                                                    • <span className="text-rose-400 font-semibold">Red Shards:</span>{' '}
+                                                    Helium-4 squall hazards that drain Stability on impact.
+                                                </li>
+                                                <li>
+                                                    • <span className="text-cyan-300 font-semibold">Nodes 1 → 2 → 3:</span>{' '}
+                                                    Trace numbered rings during Solar Flares for an 8s Magnetic Shield.
+                                                </li>
+                                            </ul>
                                         </div>
                                     </section>
 
-                                    {/* Science Section */}
-                                    <section>
-                                        <div className="flex items-center gap-2 mb-6">
-                                            <Atom className="w-5 h-5 text-blue-400" />
-                                            <h3 className="text-xl text-blue-400 font-medium tracking-tight">The Stellar Forge</h3>
+                                    <section className="space-y-4">
+                                        <div className="flex items-center gap-2 text-sky-400">
+                                            <Atom className="w-4 h-4" />
+                                            <h3 className="text-sm font-bold uppercase tracking-wider">
+                                                Astrophysics &amp; Endings
+                                            </h3>
                                         </div>
 
-                                        <div className="space-y-6">
-                                            <p className="text-slate-300 text-sm leading-relaxed italic border-l-2 border-blue-500/30 pl-4 py-1">
-                                                "Stars are the engines of the universe, crushing protons until they yield gold."
-                                            </p>
-                                            
-                                            <p className="text-slate-400 text-sm leading-relaxed">
-                                                In our simulation, you begin as a <span className="text-white">Neutron</span> (or Proton). Through successive captures, you perform <span className="text-blue-400">nucleosynthesis</span>—the process of fusing lighter elements into heavier ones.
-                                            </p>
+                                        <p className="text-sm text-slate-300 leading-relaxed">
+                                            You begin as a <span className="text-white font-medium">Carbon (C)</span>{' '}
+                                            nucleus. Capturing Alpha particles fuses heavier elements through the alpha
+                                            process until reaching <span className="text-white font-medium">Iron (Fe)</span>,
+                                            triggering a 20-second <span className="text-amber-300">Neutron Pulse</span>.
+                                        </p>
 
-                                            <div className="pt-4 border-t border-white/10">
-                                                <button 
-                                                    onClick={() => setShowNerdScience(!showNerdScience)}
-                                                    className="flex items-center justify-between w-full p-4 bg-blue-500/10 hover:bg-blue-500/20 rounded-2xl text-blue-400 transition-all font-mono text-xs uppercase tracking-widest border border-blue-500/20"
-                                                >
-                                                    Science for Nerds
-                                                    {showNerdScience ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                                </button>
-
-                                                <AnimatePresence>
-                                                    {showNerdScience && (
-                                                        <motion.div 
-                                                            initial={{ height: 0, opacity: 0 }}
-                                                            animate={{ height: 'auto', opacity: 1 }}
-                                                            exit={{ height: 0, opacity: 0 }}
-                                                            className="overflow-hidden"
-                                                        >
-                                                            <div className="pt-6 space-y-4 text-xs font-mono text-blue-300/70 leading-relaxed uppercase tracking-tighter">
-                                                                <p>
-                                                                    <span className="text-white font-bold">» Chandrasekhar Limit:</span> Stars above 1.4 solar masses cannot support themselves as white dwarfs. They collapse into Supernovae.
-                                                                </p>
-                                                                <p>
-                                                                    <span className="text-white font-bold">» Alpha Process:</span> Elements from Helium (2) to Iron (26) are primarily forged by the sequential capture of Helium-4 nuclei (Alpha particles).
-                                                                </p>
-                                                                <p>
-                                                                    <span className="text-white font-bold">» Doppler Effect:</span> Relativistic speed causes light to shift. Redshift increases the observer's interaction frequency, while Blueshift dilates time.
-                                                                </p>
-                                                                <p>
-                                                                    <span className="text-white font-bold">» The Iron Peak:</span> Iron (Fe) has the highest binding energy per nucleon. Beyond iron, fusion consumes energy rather than releasing it, leading to instant catastrophic core collapse.
-                                                                </p>
-                                                            </div>
-                                                        </motion.div>
-                                                    )}
-                                                </AnimatePresence>
+                                        <div className="bg-white/[0.04] p-4 rounded-2xl border border-white/10 text-xs text-slate-300 space-y-2">
+                                            <div>
+                                                <span className="text-sky-300 font-semibold">Below 1.40 M☉:</span>{' '}
+                                                Ascend as a <span className="text-white">Diamond White Dwarf</span>.
+                                            </div>
+                                            <div>
+                                                <span className="text-amber-300 font-semibold">1.40 M☉ or higher:</span>{' '}
+                                                Trigger a <span className="text-white">Supernova</span> that forges Gold.
                                             </div>
                                         </div>
+
+                                        <button
+                                            onClick={() => setShowNerdScience(!showNerdScience)}
+                                            className="flex items-center justify-between w-full px-4 py-3 bg-sky-500/10 hover:bg-sky-500/20 rounded-xl text-sky-300 transition-colors font-mono text-xs uppercase tracking-wider border border-sky-500/25"
+                                        >
+                                            <span>Deep Science Notes</span>
+                                            {showNerdScience ? (
+                                                <ChevronUp className="w-4 h-4" />
+                                            ) : (
+                                                <ChevronDown className="w-4 h-4" />
+                                            )}
+                                        </button>
+
+                                        <AnimatePresence>
+                                            {showNerdScience && (
+                                                <motion.div
+                                                    initial={{ height: 0, opacity: 0 }}
+                                                    animate={{ height: 'auto', opacity: 1 }}
+                                                    exit={{ height: 0, opacity: 0 }}
+                                                    className="overflow-hidden"
+                                                >
+                                                    <div className="pt-2 space-y-2.5 text-xs font-mono text-slate-400 leading-relaxed">
+                                                        <p>
+                                                            <span className="text-slate-200 font-semibold">
+                                                                Chandrasekhar Limit (1.40 M☉):
+                                                            </span>{' '}
+                                                            Maximum mass of a stable white dwarf before electron degeneracy
+                                                            pressure yields to core collapse.
+                                                        </p>
+                                                        <p>
+                                                            <span className="text-slate-200 font-semibold">Alpha Ladder:</span>{' '}
+                                                            Sequential Helium-4 captures step nuclei upward in multiples of 4
+                                                            amu from Carbon-12 to Iron-56.
+                                                        </p>
+                                                        <p>
+                                                            <span className="text-slate-200 font-semibold">Iron Peak:</span>{' '}
+                                                            Beyond Iron, nuclear fusion absorbs energy rather than releasing it,
+                                                            halting core support.
+                                                        </p>
+                                                    </div>
+                                                </motion.div>
+                                            )}
+                                        </AnimatePresence>
                                     </section>
                                 </div>
 
-                                <div className="mt-12 pt-8 border-t border-white/5 flex justify-center">
-                                    <button 
-                                        onClick={() => setShowHelp(false)}
-                                        className="px-8 py-3 bg-emerald-500 text-slate-900 font-bold rounded-full uppercase tracking-widest text-[10px] hover:bg-white transition-all shadow-[0_0_40px_rgba(16,185,129,0.3)]"
+                                <div className="mt-8 pt-6 border-t border-white/10 flex justify-center">
+                                    <button
+                                        onClick={closeHelpModal}
+                                        className="px-8 py-3 bg-emerald-500 text-slate-950 font-bold rounded-xl uppercase tracking-wider text-xs hover:bg-emerald-400 transition-colors"
                                     >
-                                        Resume Core Authority
+                                        {isPlayingOrNeutron ? 'Resume Simulation' : 'Close Manual'}
+                                    </button>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Stellar Codex Modal (Unlocked Poems & Endings) */}
+            <AnimatePresence>
+                {showCodex && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={closeCodexModal}
+                        className="fixed inset-0 z-[1000] flex items-center justify-center p-4 sm:p-8 bg-black/80 backdrop-blur-md"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, y: 12 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.95, y: 12 }}
+                            onClick={e => e.stopPropagation()}
+                            className="bg-slate-900 border border-white/15 rounded-3xl w-full max-w-3xl max-h-[85dvh] overflow-y-auto shadow-2xl no-scrollbar"
+                        >
+                            <div className="p-6 sm:p-10 relative">
+                                <button
+                                    onClick={closeCodexModal}
+                                    aria-label="Close Codex"
+                                    className="absolute top-5 right-5 p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+
+                                <div className="flex items-center gap-3.5 mb-6">
+                                    <div className="p-2.5 bg-sky-500/15 rounded-xl border border-sky-500/25">
+                                        <Library className="w-6 h-6 text-sky-400" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl font-semibold text-white">Stellar Codex</h2>
+                                        <p className="text-slate-400 text-xs uppercase tracking-widest">
+                                            {codex.unlockedElements.length}/{ELEMENTS.length} Elements Forged ·{' '}
+                                            {codex.endings.length}/2 Destinies Unlocked
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+                                    {(['dwarf', 'supernova'] as const).map(endKey => {
+                                        const unlocked = codex.endings.includes(endKey);
+                                        const info = DESTINY_POEMS[endKey];
+                                        return (
+                                            <div
+                                                key={endKey}
+                                                className={`p-4 rounded-2xl border ${
+                                                    unlocked
+                                                        ? 'bg-white/[0.05] border-amber-400/35'
+                                                        : 'bg-white/[0.02] border-white/10 opacity-50'
+                                                }`}
+                                            >
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                                                        {info.title} ({info.symbol})
+                                                    </span>
+                                                    <span className="text-[11px] font-mono text-slate-400">
+                                                        {unlocked ? 'Discovered' : 'Locked'}
+                                                    </span>
+                                                </div>
+                                                <p className="font-serif italic text-sm text-slate-200">
+                                                    {unlocked
+                                                        ? `“${info.poem[0]} ${info.poem[1]}”`
+                                                        : 'Complete a full Iron synthesis to unlock this destiny.'}
+                                                </p>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {ELEMENTS.map(el => {
+                                        const unlocked = codex.unlockedElements.includes(el.symbol);
+                                        return (
+                                            <div
+                                                key={el.symbol}
+                                                className={`p-4 rounded-2xl border flex items-start gap-3 ${
+                                                    unlocked
+                                                        ? 'bg-white/[0.04] border-white/10'
+                                                        : 'bg-white/[0.015] border-white/5 opacity-45'
+                                                }`}
+                                            >
+                                                <div
+                                                    className="w-9 h-9 rounded-lg flex items-center justify-center font-mono font-bold text-sm text-slate-950 shrink-0"
+                                                    style={{ backgroundColor: unlocked ? el.color : '#334155' }}
+                                                >
+                                                    {el.symbol}
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs font-semibold text-white">
+                                                        {el.name}{' '}
+                                                        <span className="text-slate-400 font-mono">· {el.mass} amu</span>
+                                                    </div>
+                                                    <p className="font-serif italic text-xs sm:text-sm text-slate-300 mt-1">
+                                                        {unlocked ? `“${el.poem[0]} ${el.poem[1]}”` : 'Fuse this element to record its verse.'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                <div className="mt-6 pt-5 border-t border-white/10 flex justify-center">
+                                    <button
+                                        onClick={closeCodexModal}
+                                        className="px-7 py-2.5 bg-white text-slate-950 font-semibold rounded-xl text-xs uppercase tracking-wider hover:bg-slate-200 transition-colors"
+                                    >
+                                        Close Codex
                                     </button>
                                 </div>
                             </div>
